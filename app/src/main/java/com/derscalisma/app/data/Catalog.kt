@@ -2,9 +2,6 @@ package com.derscalisma.app.data
 
 import com.derscalisma.app.R
 
-/** Şehir bölümü yeniden tasarlanana kadar gizli. */
-const val CITY_ENABLED = false
-
 const val DEFAULT_BG = "bg_none"
 const val DEFAULT_THEME = "theme_default"
 const val DEFAULT_GROUND = "ground_grass"

@@ -1,5 +1,6 @@
 package com.derscalisma.app.data
 
+import com.derscalisma.app.data.game.GameState
 import kotlinx.serialization.Serializable
 
 const val MINUTE_MS = 60_000L
@@ -131,7 +132,9 @@ data class AppData(
     val timer: TimerState? = null,
     /** Bitmiş ve ilerlemesi (sayfa/soru) henüz girilmemiş oturum. */
     val lastSession: SessionSummary? = null,
+    /** v1.0 emoji şehri; yalnızca eski kayıtları okuyup iade etmek için duruyor. */
     val city: List<PlacedBuilding> = emptyList(),
+    val game: GameState = GameState(),
     val owned: Set<String> = setOf(DEFAULT_THEME, DEFAULT_GROUND, DEFAULT_TIMER_STYLE, DEFAULT_BG),
     val theme: String = DEFAULT_THEME,
     val background: String = DEFAULT_BG,

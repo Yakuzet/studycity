@@ -24,10 +24,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.derscalisma.app.data.AppData
-import com.derscalisma.app.data.CITY_ENABLED
 import com.derscalisma.app.data.Catalog
 import com.derscalisma.app.data.Focus
 import com.derscalisma.app.data.Repo
+import com.derscalisma.app.ui.game.BattleScreen
+import com.derscalisma.app.ui.game.CityScreen
 import com.derscalisma.app.ui.screens.*
 import kotlinx.coroutines.delay
 
@@ -36,12 +37,12 @@ enum class Screen(val emoji: String, val title: String, val short: String) {
     TIMER("⏱️", "Çalış", "Çalış"),
     GOALS("🎯", "Hedefler", "Hedef"),
     WINDOWS("🗓️", "Aralıklar", "Aralık"),
-    CITY("🏙️", "Şehir", "Şehir"),
+    CITY("🏰", "Köy", "Köy"),
     MARKET("🛒", "Market", "Market"),
     SETTINGS("⚙️", "Ayarlar", "Ayar"),
 }
 
-private val visibleScreens = Screen.entries.filter { it != Screen.CITY || CITY_ENABLED }
+private val visibleScreens = Screen.entries.toList()
 
 @Composable
 fun rememberNow(): State<Long> = produceState(System.currentTimeMillis()) {
@@ -77,10 +78,12 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
     }
 
     val bg = Catalog.background(data.background)
+    var battleLevel by rememberSaveable { mutableStateOf<Int?>(null) }
     val onStart = {
         if (data.timer == null) Repo.startTimer()
         selected = Screen.TIMER
     }
+    val onAttack: (Int) -> Unit = { battleLevel = it }
 
     CompositionLocalProvider(
         LocalHasBackground provides (bg != null),
@@ -103,20 +106,23 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
 
             BoxWithConstraints(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
                 val useRail = maxWidth >= maxHeight || maxWidth >= 840.dp
-                if (useRail) {
+                val level = battleLevel
+                if (level != null) {
+                    BattleScreen(level, data) { battleLevel = null }
+                } else if (useRail) {
                     Row(Modifier.fillMaxSize()) {
                         NavRail(screen, data.coins) { selected = it }
                         ContentArea(
                             Modifier.weight(1f).fillMaxHeight()
                                 .padding(start = 8.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)
-                        ) { ScreenContent(screen, data, now, onStart) }
+                        ) { ScreenContent(screen, data, now, onStart, onAttack) }
                     }
                 } else {
                     Column(Modifier.fillMaxSize()) {
                         TopBar(screen, data.coins)
                         ContentArea(
                             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-                        ) { ScreenContent(screen, data, now, onStart) }
+                        ) { ScreenContent(screen, data, now, onStart, onAttack) }
                         BottomBar(screen) { selected = it }
                     }
                 }
@@ -146,13 +152,13 @@ private fun ContentArea(modifier: Modifier, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun ScreenContent(screen: Screen, data: AppData, now: Long, onStart: () -> Unit) {
+private fun ScreenContent(screen: Screen, data: AppData, now: Long, onStart: () -> Unit, onAttack: (Int) -> Unit) {
     when (screen) {
         Screen.HOME -> HomeScreen(data, now, onStart)
         Screen.TIMER -> TimerScreen(data, now)
         Screen.GOALS -> GoalsScreen(data, now)
         Screen.WINDOWS -> WindowsScreen(data, now)
-        Screen.CITY -> CityScreen(data)
+        Screen.CITY -> CityScreen(data, now, onAttack = onAttack, onStudy = onStart)
         Screen.MARKET -> MarketScreen(data)
         Screen.SETTINGS -> SettingsScreen(data)
     }

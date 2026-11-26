@@ -1,6 +1,12 @@
 package com.derscalisma.app.data
 
 import android.content.Context
+import com.derscalisma.app.data.game.Game
+import com.derscalisma.app.data.game.GameCatalog
+import com.derscalisma.app.data.game.advanceGame
+import com.derscalisma.app.data.game.migrateOldCity
+import com.derscalisma.app.data.game.processTraining
+import com.derscalisma.app.data.game.raidVillage
 import com.derscalisma.app.notify.AlarmScheduler
 import com.derscalisma.app.notify.Beeper
 import com.derscalisma.app.notify.Notifier
@@ -14,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
 import java.io.File
 import java.time.LocalDate
+import kotlin.math.roundToInt
 
 enum class PhaseEventKind { WORK_START, BREAK_START, FINISHED }
 
@@ -113,7 +120,7 @@ object Repo {
         }
     }
 
-    private fun <T> mutate(block: Tx.() -> T): T {
+    internal fun <T> mutate(block: Tx.() -> T): T {
         val (before, tx, result) = synchronized(lock) {
             val before = _state.value
             val tx = Tx(before, System.currentTimeMillis())
@@ -148,6 +155,8 @@ object Repo {
             processRollover()
             catchUp()
             pruneFired()
+            migrateOldCity()
+            processTraining()
             val ask = data.focusAsk
             if (ask != null && now - ask.askedAt > 30 * MINUTE_MS) data = data.copy(focusAsk = null)
         }
@@ -205,6 +214,7 @@ object Repo {
                         log("💔 $prev günlük seri sona erdi")
                         alerts += "💔 Serin sona erdi" to
                             "$prev günlük günlük hedef serin sıfırlandı. Bugün yeniden başla, yeni bir seri kur!"
+                        raidVillage(prev)
                     }
                 }
             }
@@ -426,7 +436,10 @@ object Repo {
             rec.copy(studyMs = rec.studyMs + (e - s), windowMs = wm)
         }
         val minutes = ((old + (e - s)) / MINUTE_MS - old / MINUTE_MS).toInt()
-        addCoins(minutes * Rewards.COINS_PER_MINUTE)
+        val base = minutes * Rewards.COINS_PER_MINUTE
+        val bonus = (base * Game.libraryBonus(data.game) / 100f).roundToInt()
+        addCoins(base + bonus)
+        advanceGame(e - s)
         checkAchievements(date, e)
     }
 
@@ -455,11 +468,9 @@ object Repo {
             val oldBest = data.bestDailyStreak
             if (st > oldBest) {
                 data = data.copy(bestDailyStreak = st)
-                if (CITY_ENABLED) {
-                    Catalog.buildings
-                        .filter { it.unlockStreak in (oldBest + 1)..st }
-                        .forEach { notices += "🏗️ Yeni bina açıldı: ${it.emoji} ${it.name}" }
-                }
+                GameCatalog.DECOR_UNLOCK
+                    .filter { (_, need) -> need in (oldBest + 1)..st }
+                    .forEach { (t, _) -> notices += "🏡 Köyün için yeni süs açıldı: ${t.title}" }
             }
         }
 
@@ -536,24 +547,6 @@ object Repo {
 
     fun deleteWindow(id: String) = mutate {
         data = data.copy(windows = data.windows.filterNot { it.id == id })
-    }
-
-    // ---------------------------------------------------------------- city
-
-    fun placeBuilding(x: Int, y: Int, buildingId: String): String? = mutate {
-        val b = Catalog.building(buildingId) ?: return@mutate "Bina bulunamadı"
-        if (data.city.any { it.x == x && it.y == y }) return@mutate "Bu alan dolu"
-        if (data.bestDailyStreak < b.unlockStreak) return@mutate "🔒 ${b.name} için ${b.unlockStreak} günlük seri gerekli"
-        if (data.coins < b.price) return@mutate "Yetersiz para: ${b.price - data.coins} 🪙 daha lazım"
-        data = data.copy(coins = data.coins - b.price, city = data.city + PlacedBuilding(x, y, buildingId))
-        null
-    }
-
-    fun removeBuilding(x: Int, y: Int): String? = mutate {
-        val p = data.city.find { it.x == x && it.y == y } ?: return@mutate null
-        val refund = (Catalog.building(p.buildingId)?.price ?: 0) / 2
-        data = data.copy(coins = data.coins + refund, city = data.city - p)
-        "Bina kaldırıldı, +$refund 🪙 iade"
     }
 
     // ---------------------------------------------------------------- market

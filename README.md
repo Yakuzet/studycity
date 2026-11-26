@@ -1,6 +1,6 @@
 # StudyCity (Ders Şehri)
 
-A gamified study app for Android: daily goals, streaks, a Pomodoro-style timer, a focus check system and a reward market. Works in both portrait and landscape and adapts to phones, small landscape screens and tablets.
+A gamified study app for Android: daily goals, streaks, a Pomodoro-style timer, a focus check system, a reward market and a village-building strategy game that only grows while you study. Works in both portrait and landscape and adapts to phones, small landscape screens and tablets.
 
 > I had already written this app before, and I revised it with the help of AI.
 
@@ -15,7 +15,10 @@ A gamified study app for Android: daily goals, streaks, a Pomodoro-style timer, 
 - **Focus check:** optional beeps at a fixed interval or at random moments between a min and a max. The app can ask "Are you focused?" after every beep and/or at ½, ⅓ or ¼ of each work round. Your answers become a focused/distracted percentage per session, per day and overall. You can answer from the notification too.
 - **Streak warnings:** "you're about to lose your streak" notifications at a time you choose and at 22:30, plus a notice when a streak ends or a streak freeze saves it.
 - **Coins & market:** earn coins for studying, goals, streaks and streak milestones. Spend them on 12 photo backgrounds, colour themes, timer ring styles and streak freezes.
-- **City:** a city builder is planned for a later version and is hidden for now.
+- **Village game:** build and upgrade your own village (town hall, barracks, army camps, academy, archer/cannon/magic towers, library, gold mines, decorations).
+  - Every construction and upgrade costs coins **and study minutes**: builders only work while you are studying. More builders (expensive) let you run several constructions at once.
+  - Train 5 troop types (swordsman, apprentice, knight, mage, healer), research upgrades in the academy, and attack 30 campaign villages in an animated real-time battle (deploy troops, towers shoot back, earn up to 3 stars and loot).
+  - Breaking your daily streak lets raiders attack your village; strong defenses repel them.
 
 ## Building
 
@@ -28,6 +31,10 @@ gradlew assembleDebug
 The APK is written to `app/build/outputs/apk/debug/app-debug.apk`. Ready-made APKs are attached to each [release](../../releases).
 
 Layout screenshots for several screen sizes can be rendered with `gradlew :app:recordPaparazziDebug`.
+
+## Art credits
+
+Village and battle sprites: [Kenney – Medieval RTS](https://kenney.nl/assets/medieval-rts), licensed [CC0](licenses/kenney-medieval-rts-CC0.txt).
 
 ## Photo credits
 
@@ -65,7 +72,10 @@ Oyunlaştırılmış bir Android ders çalışma uygulaması. Hem dikey hem yata
 - **Dikkat toplama:** Sabit aralıklarla ya da en az–en fazla süre arasında rastgele bip çalar. Her bipten sonra ve/veya çalışma turunun ½, ⅓ ya da ¼ noktalarında "Dikkatin toplu mu?" diye sorar. Cevaplar oturum, gün ve tüm zamanlar için toplu/dağınık yüzdesine dönüşür.
 - **Seri uyarıları:** Seçtiğin saatte ve 22:30'da "serini kaybetmek üzeresin" bildirimi.
 - **Para ve market:** 12 fotoğraflı arka plan, renk temaları, zamanlayıcı halka stilleri ve seri dondurucu.
-- **Şehir:** Sonraki bir sürümde gelecek, şimdilik gizli.
+- **Köy oyunu:** Kendi köyünü kur ve yükselt: Merkez Kale, kışla, ordugâh, akademi, okçu/top/büyü kuleleri, kütüphane, altın madeni ve süsler.
+  - Her inşaat ve yükseltme altın **ve ders süresi** ister. İnşaatçılar sadece sen ders çalışırken çalışır. Pahalı ek inşaatçılarla aynı anda birden fazla inşaat yürütülür.
+  - 5 asker türü eğit (kılıççı, büyü çırağı, şövalye, büyücü, şifacı), akademide güçlendir ve 30 sefer köyüne animasyonlu, gerçek zamanlı savaşta saldır. En fazla 3 yıldız ve ganimet kazanılır.
+  - Günlük serin bozulursa köyüne baskın gelir; güçlü savunma baskını püskürtür.
 
 ### Derleme
 

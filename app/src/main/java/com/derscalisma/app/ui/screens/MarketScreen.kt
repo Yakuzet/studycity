@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import com.derscalisma.app.data.*
 import com.derscalisma.app.ui.*
 
-private val marketCategories = ItemCategory.entries.filter { it != ItemCategory.GROUND || CITY_ENABLED }
+private val marketCategories = ItemCategory.entries.filter { it != ItemCategory.GROUND }
 
 @Composable
 fun MarketScreen(data: AppData) {
