@@ -11,9 +11,12 @@ data class BattleResult(
     val stars: Int,
     val destruction: Float,
     val used: Map<TType, Int>,
+    val spellsUsed: Map<SType, Int> = emptyMap(),
+    /** Komutan savaşa girdiyse kalan can oranı. */
+    val heroHpRatio: Float? = null,
 )
 
-data class BattleReward(val loot: Int, val starBonus: Int, val newStars: Int)
+data class BattleReward(val loot: Int, val starBonus: Int, val newStars: Int, val leagueBonus: Int = 0)
 
 /** Köy oyununun sorguları ve oyuncu işlemleri. */
 object Game {
@@ -49,8 +52,27 @@ object Game {
     }
 
     fun defensePower(g: GameState): Float = g.buildings.sumOf { b ->
-        if (b.level < 1) 0.0 else (GameCatalog.defense(b.type, b.level)?.dps ?: 0f).toDouble()
+        when {
+            b.level < 1 -> 0.0
+            b.type == BType.WALL -> 0.5 * b.level
+            else -> (GameCatalog.defense(b.type, b.level)?.dps ?: 0f).toDouble()
+        }
     }.toFloat()
+
+    // ---- Komutan ve büyüler
+
+    fun heroLevel(g: GameState) = g.buildings.find { it.type == BType.HERO_ALTAR && it.level >= 1 }?.level ?: 0
+
+    /** Komutan savaşa hazır mı? (Kürsü var, yükseltilmiyor, dinlenmesi bitti) */
+    fun heroReady(g: GameState, now: Long): Boolean {
+        val altar = g.buildings.find { it.type == BType.HERO_ALTAR } ?: return false
+        return altar.level >= 1 && altar.upgrade == null && now >= g.heroReadyAt
+    }
+
+    fun forgeLevel(g: GameState) = maxBuiltLevel(g, BType.SPELL_FORGE)
+    fun spellCapacity(g: GameState) = GameCatalog.spellCapacity(forgeLevel(g))
+    fun spellCount(g: GameState) = g.spells.values.sum() + g.spellQueue.sumOf { it.count }
+    fun league(g: GameState) = League.of(stars(g))
 
     fun raidStrength(g: GameState, streak: Int): Float = 6f * th(g) + streak.coerceAtMost(25)
 
@@ -91,7 +113,7 @@ object Game {
             if (count(g, t) >= GameCatalog.limit(t, th)) {
                 return GameCatalog.unlockHint(t, th)?.let { "🔒 $it" } ?: "En fazla sayıya ulaştın"
             }
-            if (freeBuilders(g) <= 0) return "Boş inşaatçı yok"
+            if (freeBuilders(g) <= 0 && GameCatalog.studyMinutes(t, 1) > 0) return "Boş inşaatçı yok"
         }
         val cost = GameCatalog.cost(t, 1)
         if (coins < cost) return "Yetersiz altın"
@@ -122,9 +144,13 @@ object Game {
         val to = b.level + 1
         if (to > b.type.maxLevel) return@mutate "En yüksek seviyede"
         if (to > GameCatalog.maxLevelAt(b.type, th(g))) return@mutate "🔒 Önce Merkez Kale'yi yükselt"
-        if (freeBuilders(g) <= 0) return@mutate "Boş inşaatçı yok"
         val cost = GameCatalog.cost(b.type, to)
         if (data.coins < cost) return@mutate "Yetersiz altın: ${cost - data.coins} 🪙 daha lazım"
+        if (b.type == BType.WALL) {
+            data = data.copy(coins = data.coins - cost, game = g.copy(buildings = g.buildings.map { if (it.id == id) it.copy(level = to) else it }))
+            return@mutate null
+        }
+        if (freeBuilders(g) <= 0) return@mutate "Boş inşaatçı yok"
         val stored = mineStored(b, now)
         val nb = b.copy(upgrade = Upgrade(to, GameCatalog.studyMinutes(b.type, to) * MINUTE_MS))
         data = data.copy(
@@ -233,8 +259,73 @@ object Game {
         "📚 ${t.title} seviye $to araştırması başladı"
     }
 
-    /** Eğitim kuyruğunu günceller (ekranlar açıkken her saniye çağrılır). */
-    fun refresh() = Repo.mutate { processTraining() }
+    /** Aynı seviyedeki tüm surları paranın yettiği kadar bir seviye yükseltir. */
+    fun upgradeWalls(level: Int): String? = Repo.mutate {
+        val g = data.game
+        val to = level + 1
+        if (to > GameCatalog.maxLevelAt(BType.WALL, th(g))) return@mutate "🔒 Önce Merkez Kale'yi yükselt"
+        val cost = GameCatalog.cost(BType.WALL, to)
+        var coins = data.coins
+        var n = 0
+        val list = g.buildings.map { b ->
+            if (b.type == BType.WALL && b.level == level && coins >= cost) {
+                coins -= cost
+                n++
+                b.copy(level = to)
+            } else b
+        }
+        if (n == 0) return@mutate "Yetersiz altın"
+        data = data.copy(coins = coins, game = g.copy(buildings = list))
+        "🧱 $n sur seviye $to oldu"
+    }
+
+    fun brew(s: SType, n: Int): String? = Repo.mutate {
+        processSpells()
+        val g = data.game
+        if (forgeLevel(g) < s.forgeLevel) return@mutate "🔒 Büyü Atölyesi Sv ${s.forgeLevel} gerekli"
+        val count = minOf(n, spellCapacity(g) - spellCount(g))
+        if (count <= 0) return@mutate "Büyü kapasitesi dolu"
+        if (data.coins < s.cost * count) return@mutate "Yetersiz altın"
+        val q = g.spellQueue.toMutableList()
+        val last = q.lastOrNull()
+        if (last != null && last.spell == s) q[q.size - 1] = last.copy(count = last.count + count) else q += SpellJob(s, count)
+        data = data.copy(
+            coins = data.coins - s.cost * count,
+            game = g.copy(spellQueue = q, spellQueueStartedAt = if (g.spellQueue.isEmpty()) now else g.spellQueueStartedAt),
+        )
+        null
+    }
+
+    fun cancelBrew(index: Int): String? = Repo.mutate {
+        processSpells()
+        val g = data.game
+        val job = g.spellQueue.getOrNull(index) ?: return@mutate null
+        val q = g.spellQueue.toMutableList().also { it.removeAt(index) }
+        data = data.copy(
+            coins = data.coins + job.spell.cost * job.count,
+            game = g.copy(spellQueue = q, spellQueueStartedAt = if (index == 0) now else g.spellQueueStartedAt),
+        )
+        null
+    }
+
+    fun claimQuest(id: String): String? = Repo.mutate {
+        val st = Quests.status(data).find { it.quest.id == id } ?: return@mutate null
+        if (!st.claimable) return@mutate null
+        val g = data.game
+        data = data.copy(
+            coins = data.coins + st.reward,
+            totalEarned = data.totalEarned + st.reward,
+            game = g.copy(claimed = g.claimed + (id to st.claimedTiers + 1)),
+        )
+        log("${st.quest.emoji} Görev: ${st.quest.title} (${st.target} ${st.quest.unit})", st.reward)
+        "${st.quest.emoji} ${st.quest.title} ödülü: +${st.reward} 🪙"
+    }
+
+    /** Eğitim ve büyü kuyruklarını günceller (ekranlar açıkken çağrılır). */
+    fun refresh() = Repo.mutate {
+        processTraining()
+        processSpells()
+    }
 
     fun finishBattle(r: BattleResult): BattleReward = Repo.mutate {
         val g = data.game
@@ -244,9 +335,17 @@ object Game {
             val left = (army[t] ?: 0) - n
             if (left > 0) army[t] = left else army.remove(t)
         }
+        val spells = g.spells.toMutableMap()
+        r.spellsUsed.forEach { (s, n) ->
+            val left = (spells[s] ?: 0) - n
+            if (left > 0) spells[s] = left else spells.remove(s)
+        }
+        val heroReadyAt = r.heroHpRatio?.let { now + (GameCatalog.HERO_FULL_REGEN_MS * (1f - it.coerceIn(0f, 1f))).toLong() } ?: g.heroReadyAt
         val prev = g.stars[r.level] ?: 0
         val factor = if (prev >= 3) Campaign.REPLAY_LOOT_FACTOR else 1f
-        val loot = (village.loot * r.destruction * factor).roundToInt()
+        val baseLoot = (village.loot * r.destruction * factor).roundToInt()
+        val leagueBonus = baseLoot * League.of(stars(g)).lootBonus / 100
+        val loot = baseLoot + leagueBonus
         val newStars = (r.stars - prev).coerceAtLeast(0)
         val bonus = newStars * Campaign.starBonus(r.level)
         val total = loot + bonus
@@ -255,12 +354,14 @@ object Game {
             totalEarned = data.totalEarned + total,
             game = g.copy(
                 army = army,
+                spells = spells,
+                heroReadyAt = heroReadyAt,
                 stars = g.stars + (r.level to maxOf(prev, r.stars)),
                 battlesWon = g.battlesWon + if (r.stars > 0) 1 else 0,
             ),
         )
         log("⚔️ ${village.name}: ${"⭐".repeat(r.stars)} %${(r.destruction * 100).roundToInt()} yıkım", total)
-        BattleReward(loot, bonus, newStars)
+        BattleReward(loot, bonus, newStars, leagueBonus)
     }
 }
 
@@ -308,17 +409,47 @@ internal fun Repo.Tx.processTraining() {
     val army = g.army.toMutableMap()
     val queue = g.queue.toMutableList()
     var changed = false
+    var trained = 0
     while (queue.isNotEmpty()) {
         val head = queue[0]
         val end = start + Game.trainMs(g, head.troop)
         if (now < end) break
         army[head.troop] = (army[head.troop] ?: 0) + 1
+        trained++
         start = end
         if (head.count <= 1) queue.removeAt(0) else queue[0] = head.copy(count = head.count - 1)
         changed = true
     }
     if (changed) {
-        data = data.copy(game = g.copy(army = army, queue = queue, queueStartedAt = if (queue.isEmpty()) 0 else start))
+        data = data.copy(
+            game = g.copy(
+                army = army,
+                queue = queue,
+                queueStartedAt = if (queue.isEmpty()) 0 else start,
+                troopsTrained = g.troopsTrained + trained,
+            )
+        )
+    }
+}
+
+internal fun Repo.Tx.processSpells() {
+    val g = data.game
+    if (g.spellQueue.isEmpty()) return
+    var start = g.spellQueueStartedAt
+    val spells = g.spells.toMutableMap()
+    val queue = g.spellQueue.toMutableList()
+    var changed = false
+    while (queue.isNotEmpty()) {
+        val head = queue[0]
+        val end = start + head.spell.brewSec * 1000L
+        if (now < end) break
+        spells[head.spell] = (spells[head.spell] ?: 0) + 1
+        start = end
+        if (head.count <= 1) queue.removeAt(0) else queue[0] = head.copy(count = head.count - 1)
+        changed = true
+    }
+    if (changed) {
+        data = data.copy(game = g.copy(spells = spells, spellQueue = queue, spellQueueStartedAt = if (queue.isEmpty()) 0 else start))
     }
 }
 

@@ -8,7 +8,7 @@ A gamified study app for Android: daily goals, streaks, a Pomodoro-style timer, 
 
 ## Features
 
-- **Timer:** set work length, break length and number of rounds (presets 25/5 ×4, 50/10 ×3, …). Runs on alarms, so it keeps working while the app is closed; the notification shows a countdown with Pause / Resume / Stop buttons.
+- **Timer:** set work length, break length and number of rounds (presets 25/5 ×4, 50/10 ×3, …). Settings can be changed while a session is running (elapsed time is kept), and the current phase can be extended or shortened by 5 minutes. Runs on alarms, so it keeps working while the app is closed; the notification shows a countdown with Pause / Resume / Stop buttons.
 - **Main goal:** daily study minutes. 🔥 The daily-goal streak is the most rewarding streak.
 - **Extra goals:** pages, questions/tests, topics or a custom goal, each with its own streak. After a session the app asks how much you got done.
 - **Study windows:** e.g. weekdays 17:00–19:00. You get a "time to study" notification when a window starts, a nudge if you haven't started, and a warning before it ends. Two separate streaks: studying inside windows, and hitting the window's minute goal.
@@ -19,6 +19,11 @@ A gamified study app for Android: daily goals, streaks, a Pomodoro-style timer, 
   - Every construction and upgrade costs coins **and study minutes**: builders only work while you are studying. More builders (expensive) let you run several constructions at once.
   - Train 5 troop types (swordsman, apprentice, knight, mage, healer), research upgrades in the academy, and attack 30 campaign villages in an animated real-time battle (deploy troops, towers shoot back, earn up to 3 stars and loot).
   - Breaking your daily streak lets raiders attack your village; strong defenses repel them.
+  - Walls and real pathfinding: troops walk around buildings and either go around walls or break through them. Wall Breakers blow walls open.
+  - A hero (the Commander) levelled up with study time, with a once-per-battle "War Cry" ability; he needs rest after getting hurt.
+  - Spells brewed in the Spell Forge: Heal, Rage and Lightning, cast anywhere on the battlefield.
+  - Quests with tiered rewards (study hours, streaks, town hall, battles, stars, focus, troops, walls…) and leagues based on total stars that boost loot.
+- **Safe saves:** the save file is written atomically, rotated into hourly backups, and never thrown away if it can't be read (every readable part is recovered). On Android 10+ an automatic backup is written to `Downloads/StudyCity/studycity-yedek.json`, which survives uninstalling the app; it can be restored with *Import* in Settings or from the card shown on a fresh install. Manual export/import is available too.
 
 ## Building
 
@@ -76,6 +81,12 @@ Oyunlaştırılmış bir Android ders çalışma uygulaması. Hem dikey hem yata
   - Her inşaat ve yükseltme altın **ve ders süresi** ister. İnşaatçılar sadece sen ders çalışırken çalışır. Pahalı ek inşaatçılarla aynı anda birden fazla inşaat yürütülür.
   - 5 asker türü eğit (kılıççı, büyü çırağı, şövalye, büyücü, şifacı), akademide güçlendir ve 30 sefer köyüne animasyonlu, gerçek zamanlı savaşta saldır. En fazla 3 yıldız ve ganimet kazanılır.
   - Günlük serin bozulursa köyüne baskın gelir; güçlü savunma baskını püskürtür.
+  - Surlar ve gerçek yol bulma: askerler binaların etrafından dolaşır, surları ya dolanır ya kırar. Duvar Kırıcılar surları patlatır.
+  - Ders çalışarak yükselttiğin kahraman Komutan; savaşta bir kez "Savaş Narası" kullanır, yaralanınca dinlenir.
+  - Büyü Atölyesi'nde şifa, öfke ve yıldırım büyüleri; savaşta istediğin yere atarsın.
+  - Kademeli ödüllü görevler ve toplam yıldıza göre ganimet bonusu veren ligler.
+- **Güvenli kayıt:** Kayıt dosyası güvenli yazılır, saatlik yedeklenir ve okunamazsa asla silinmez, okunabilen her parça kurtarılır. Android 10+ cihazlarda İndirilenler/StudyCity/studycity-yedek.json dosyasına otomatik yedek alınır; uygulamayı silsen bile kalır ve Ayarlar → İçe aktar ile geri yüklenir.
+- **Aktif oturum:** Çalışma sürerken süre, mola ve tur sayısı değiştirilebilir (geçen süre korunur), o anki faz ±5 dk uzatılıp kısaltılabilir.
 
 ### Derleme
 

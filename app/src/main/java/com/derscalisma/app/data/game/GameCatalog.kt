@@ -16,6 +16,9 @@ object GameCatalog {
         BType.MAGIC_TOWER to intArrayOf(0, 2000, 5000, 10000, 18000),
         BType.LIBRARY to intArrayOf(0, 500, 1500, 3500, 7000, 12000),
         BType.GOLD_MINE to intArrayOf(0, 250, 800, 2000, 4500, 8000),
+        BType.WALL to intArrayOf(0, 25, 60, 150, 400, 1000),
+        BType.SPELL_FORGE to intArrayOf(0, 1500, 4000, 9000),
+        BType.HERO_ALTAR to intArrayOf(0, 1000, 1500, 2200, 3000, 4000, 5500, 7000, 9000, 11000, 14000),
         BType.TREE to intArrayOf(0, 30),
         BType.PINE to intArrayOf(0, 30),
         BType.BUSH to intArrayOf(0, 20),
@@ -37,6 +40,8 @@ object GameCatalog {
         BType.MAGIC_TOWER to intArrayOf(0, 120, 300, 540, 840),
         BType.LIBRARY to intArrayOf(0, 30, 90, 200, 360, 540),
         BType.GOLD_MINE to intArrayOf(0, 15, 60, 150, 300, 480),
+        BType.SPELL_FORGE to intArrayOf(0, 90, 240, 480),
+        BType.HERO_ALTAR to intArrayOf(0, 30, 45, 60, 90, 120, 180, 240, 300, 360, 420),
     )
 
     /** Merkez Kale seviyesine (1..6) göre en fazla kaç tane yapılabilir. */
@@ -49,6 +54,9 @@ object GameCatalog {
         BType.MAGIC_TOWER to intArrayOf(0, 0, 0, 1, 1, 2),
         BType.LIBRARY to intArrayOf(0, 1, 1, 1, 1, 1),
         BType.GOLD_MINE to intArrayOf(1, 1, 2, 2, 3, 3),
+        BType.WALL to intArrayOf(10, 25, 50, 75, 100, 125),
+        BType.SPELL_FORGE to intArrayOf(0, 0, 1, 1, 1, 1),
+        BType.HERO_ALTAR to intArrayOf(0, 1, 1, 1, 1, 1),
     )
 
     /** Süs eşyaları en iyi günlük seriyle açılır. */
@@ -72,8 +80,12 @@ object GameCatalog {
     }
 
     /** Bir binanın çıkabileceği en yüksek seviye (Merkez Kale seviyesi +1, kendi sınırına kadar). */
-    fun maxLevelAt(t: BType, th: Int): Int =
-        if (t == BType.TOWN_HALL) t.maxLevel else minOf(t.maxLevel, th + 1)
+    fun maxLevelAt(t: BType, th: Int): Int = when (t) {
+        BType.TOWN_HALL -> t.maxLevel
+        BType.HERO_ALTAR -> minOf(t.maxLevel, th * 2)
+        BType.WALL -> minOf(t.maxLevel, th)
+        else -> minOf(t.maxLevel, th + 1)
+    }
 
     /** Bir sonraki Merkez Kale seviyesinde açılan ilk bina limitini bulur (ipucu metni için). */
     fun unlockHint(t: BType, th: Int): String? {
@@ -92,10 +104,21 @@ object GameCatalog {
             BType.MAGIC_TOWER -> 460f
             BType.BUILDER_HUT -> 250f
             BType.HOUSE, BType.WINDMILL -> 220f
+            BType.WALL -> 250f
+            BType.HERO_ALTAR -> 600f
             else -> 320f
         }
         return base * (1f + 0.3f * (level.coerceAtLeast(1) - 1))
     }
+
+    /** Surlar seviyeyle çok daha sağlamlaşır. */
+    fun wallHp(level: Int) = intArrayOf(0, 300, 550, 900, 1400, 2100).getOrElse(level.coerceIn(1, 5)) { 300 }.toFloat()
+
+    fun spellCapacity(forgeLevel: Int) = if (forgeLevel <= 0) 0 else forgeLevel + 1
+
+    /** Komutan seviyesi çarpanı ve yaralanınca dinlenme süresi. */
+    fun heroMultiplier(level: Int) = 1f + 0.15f * (level.coerceAtLeast(1) - 1)
+    const val HERO_FULL_REGEN_MS = 20 * 60_000L
 
     fun armyCapacity(level: Int) = intArrayOf(0, 15, 25, 35, 45, 60).getOrElse(level) { 0 }
     fun libraryBonusPercent(level: Int) = intArrayOf(0, 5, 10, 15, 20, 30).getOrElse(level) { 0 }

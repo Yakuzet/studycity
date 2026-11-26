@@ -51,11 +51,15 @@ class GameScreenshotTest {
                 GBuilding("t1", BType.TREE, 1, 3, 18), GBuilding("t2", BType.PINE, 1, 4, 19),
                 GBuilding("t3", BType.TREE, 1, 19, 3), GBuilding("f1", BType.FIELD, 1, 18, 15),
                 GBuilding("f2", BType.FIELD, 1, 19, 15), GBuilding("s1", BType.STATUE, 1, 12, 14),
-            ),
+                GBuilding("alt", BType.HERO_ALTAR, 3, 4, 14), GBuilding("forge", BType.SPELL_FORGE, 1, 16, 3),
+            ) + (8..14).map { GBuilding("wt$it", BType.WALL, 2, it, 5) } + (6..12).map { GBuilding("wl$it", BType.WALL, 3, 8, it) },
             army = mapOf(TType.SWORD to 12, TType.APPRENTICE to 6),
             queue = listOf(TrainJob(TType.APPRENTICE, 3)),
             queueStartedAt = now - 5000,
-            stars = mapOf(1 to 3, 2 to 2, 3 to 1),
+            stars = mapOf(1 to 3, 2 to 2, 3 to 1, 4 to 3, 5 to 3, 6 to 2),
+            spells = mapOf(SType.HEAL to 1, SType.RAGE to 1),
+            troopsTrained = 45,
+            battlesWon = 6,
         )
     }
 
@@ -88,16 +92,25 @@ class GameScreenshotTest {
     }
 
     @Test fun army() = tab("army", CityTab.ARMY)
+    @Test fun quests() = tab("quests", CityTab.QUESTS)
     @Test fun campaign() = tab("campaign", CityTab.CAMPAIGN)
 
     @Test
     fun battleFrame() {
-        val e = BattleEngine(Campaign.village(6), mapOf(TType.SWORD to 15, TType.APPRENTICE to 10, TType.KNIGHT to 2, TType.MAGE to 2), emptyMap(), seed = 3)
+        val e = BattleEngine(
+            Campaign.village(12), mapOf(TType.SWORD to 15, TType.BREAKER to 4, TType.APPRENTICE to 10, TType.KNIGHT to 2, TType.MAGE to 2),
+            emptyMap(), seed = 3, heroLevel = 4, spells = mapOf(SType.RAGE to 1, SType.HEAL to 1),
+        )
+        repeat(4) { e.deploy(TType.BREAKER, 1.2f, 9f + it) }
+        e.deploy(TType.HERO, 1.2f, 12f)
         repeat(15) { e.deploy(TType.SWORD, 1.2f, 4f + it * 0.9f) }
         repeat(10) { e.deploy(TType.APPRENTICE, 4f + it, 22.6f) }
         repeat(2) { e.deploy(TType.KNIGHT, 1.0f, 12f + it) }
         repeat(2) { e.deploy(TType.MAGE, 2f + it, 22.7f) }
-        repeat((14f / 0.033f).toInt()) { e.step(0.033f) }
+        repeat((12f / 0.033f).toInt()) { e.step(0.033f) }
+        e.castSpell(SType.RAGE, 7f, 12f)
+        e.castSpell(SType.HEAL, 12f, 18f)
+        repeat((2f / 0.033f).toInt()) { e.step(0.033f) }
         paparazzi.snapshot("battle") {
             BattleFrame(e, Modifier.fillMaxSize().background(Color(0xFF2E4A26)))
         }

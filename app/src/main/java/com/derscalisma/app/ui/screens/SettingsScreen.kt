@@ -83,6 +83,7 @@ fun SettingsScreen(data: AppData) {
                     Switch(checked = s.keepScreenOn, onCheckedChange = { v -> Repo.updateSettings { it.copy(keepScreenOn = v) } })
                 }
             }
+            BackupPanel()
             Panel(Modifier.fillMaxWidth(), title = "📊 İstatistikler") {
                 val totalMs = data.days.values.sumOf { it.studyMs }
                 val sessions = data.days.values.sumOf { it.sessions }

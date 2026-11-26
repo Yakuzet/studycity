@@ -32,7 +32,7 @@ import com.derscalisma.app.data.game.*
 import com.derscalisma.app.ui.*
 import kotlin.math.roundToInt
 
-enum class CityTab(val title: String) { VILLAGE("🏰 Köy"), ARMY("⚔️ Ordu"), CAMPAIGN("🗺️ Seferler") }
+enum class CityTab(val title: String) { VILLAGE("🏰 Köy"), ARMY("⚔️ Ordu"), CAMPAIGN("🗺️ Seferler"), QUESTS("🏆 Görevler") }
 
 private data class Placing(val type: BType, val x: Int, val y: Int, val moveId: String?)
 
@@ -48,9 +48,12 @@ fun CityScreen(
     val g = data.game
 
     // Eğitim kuyruğunu canlı tut.
-    LaunchedEffect(g.queue.isNotEmpty(), now / 1000) {
+    LaunchedEffect(g.queue.isNotEmpty() || g.spellQueue.isNotEmpty(), now / 1000) {
         val head = g.queue.firstOrNull()
-        if (head != null && now >= g.queueStartedAt + Game.trainMs(g, head.troop)) Game.refresh()
+        val spell = g.spellQueue.firstOrNull()
+        val troopDue = head != null && now >= g.queueStartedAt + Game.trainMs(g, head.troop)
+        val spellDue = spell != null && now >= g.spellQueueStartedAt + spell.spell.brewSec * 1000L
+        if (troopDue || spellDue) Game.refresh()
     }
 
     Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -59,8 +62,13 @@ fun CityScreen(
                 Modifier.weight(1f).horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
+                val claimable = Quests.claimableCount(data)
                 CityTab.entries.forEach { t ->
-                    FilterChip(selected = tab == t, onClick = { tab = t }, label = { Text(t.title) })
+                    FilterChip(
+                        selected = tab == t,
+                        onClick = { tab = t },
+                        label = { Text(if (t == CityTab.QUESTS && claimable > 0) "${t.title} ($claimable)" else t.title) },
+                    )
                 }
             }
             Spacer(Modifier.width(8.dp))
@@ -74,6 +82,7 @@ fun CityScreen(
             CityTab.VILLAGE -> VillageTab(data, now, onStudy)
             CityTab.ARMY -> ArmyTab(data, now)
             CityTab.CAMPAIGN -> CampaignTab(data, onAttack) { tab = CityTab.ARMY }
+            CityTab.QUESTS -> QuestsTab(data)
         }
     }
 }
@@ -100,7 +109,7 @@ private fun VillageTab(data: AppData, now: Long, onStudy: () -> Unit) {
     }
 
     val panel: (@Composable ColumnScope.() -> Unit)? = when {
-        placing != null -> { { PlacementPanel(data, placing!!, ghost?.ok == true) { placing = null } } }
+        placing != null -> { { PlacementPanel(data, placing!!, ghost?.ok == true, onNext = { placing = it }) { placing = null } } }
         selected != null -> { { BuildingPanel(data, selected, now, onStudy, onMove = { placing = Placing(selected.type, selected.x, selected.y, selected.id) }) { selectedId = null } } }
         else -> null
     }
@@ -161,19 +170,29 @@ private fun VillageTab(data: AppData, now: Long, onStudy: () -> Unit) {
 }
 
 @Composable
-private fun SpriteIcon(type: BType, size: Int = 44) {
+private fun SpriteIcon(type: BType, size: Int = 44, level: Int = 1) {
+    if (type == BType.WALL) {
+        androidx.compose.foundation.Canvas(Modifier.size(size.dp)) {
+            drawWall(level, 0f, 0f, this.size.minDimension, right = false, down = false)
+        }
+        return
+    }
     val sp = rememberSprites()
     Image(sp.building(type), contentDescription = type.title, modifier = Modifier.size(size.dp))
 }
 
 @Composable
-private fun PlacementPanel(data: AppData, p: Placing, ok: Boolean, onDone: () -> Unit) {
+private fun PlacementPanel(data: AppData, p: Placing, ok: Boolean, onNext: (Placing) -> Unit = {}, onDone: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         SpriteIcon(p.type)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(if (p.moveId == null) "${p.type.title} kur" else "${p.type.title} taşı", fontWeight = FontWeight.Bold)
-            Text("Haritada dokunduğun yere taşınır.", style = MaterialTheme.typography.bodySmall)
+            Text(
+                if (p.type == BType.WALL && p.moveId == null) "Sur modu: her \"Buraya\" bir sur koyar ve yanına geçer. Bitince Vazgeç'e bas."
+                else "Haritada dokunduğun yere taşınır.",
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
     }
     Spacer(Modifier.height(8.dp))
@@ -188,7 +207,7 @@ private fun PlacementPanel(data: AppData, p: Placing, ok: Boolean, onDone: () ->
         Button(enabled = ok, onClick = {
             val msg = if (p.moveId == null) Game.build(p.type, p.x, p.y) else Game.move(p.moveId, p.x, p.y)
             msg?.let(Repo::toast)
-            onDone()
+            if (p.type == BType.WALL && p.moveId == null) onNext(p.copy(x = p.x + 1)) else onDone()
         }) { Text("✓ Buraya") }
         OutlinedButton(onClick = onDone) { Text("✕ Vazgeç") }
     }
@@ -207,7 +226,7 @@ private fun BuildingPanel(
     val cs = MaterialTheme.colorScheme
     val th = Game.th(g)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        SpriteIcon(b.type, 52)
+        SpriteIcon(b.type, 52, b.level.coerceAtLeast(1))
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
             Text(b.type.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
@@ -259,22 +278,30 @@ private fun BuildingPanel(
         val cost = GameCatalog.cost(b.type, to)
         val study = GameCatalog.studyMinutes(b.type, to)
         Text("Seviye $to'e yükselt", fontWeight = FontWeight.SemiBold)
-        Text("💰 $cost 🪙   📖 $study dk ders", style = MaterialTheme.typography.bodyMedium)
+        Text("💰 $cost 🪙" + if (study > 0) "   📖 $study dk ders" else "   ⚡ anında", style = MaterialTheme.typography.bodyMedium)
         statLines(g, b.type, to, now, null).forEach {
             Text("→ $it", style = MaterialTheme.typography.bodySmall, color = cs.secondary)
         }
         val block = when {
             to > GameCatalog.maxLevelAt(b.type, th) -> "🔒 Önce Merkez Kale'yi yükselt"
-            Game.freeBuilders(g) <= 0 -> "👷 Boş inşaatçı yok"
+            b.type != BType.WALL && Game.freeBuilders(g) <= 0 -> "👷 Boş inşaatçı yok"
             data.coins < cost -> "💰 ${cost - data.coins} 🪙 daha lazım"
             else -> null
         }
         if (block != null) Text(block, color = cs.error, style = MaterialTheme.typography.bodySmall)
-        Button(
-            enabled = block == null,
-            onClick = { Game.upgrade(b.id)?.let(Repo::toast) },
-            modifier = Modifier.padding(top = 6.dp),
-        ) { Text("🔨 Yükselt") }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 6.dp)) {
+            Button(enabled = block == null, onClick = { Game.upgrade(b.id)?.let(Repo::toast) }) {
+                Text(if (b.type == BType.WALL) "🧱 Yükselt" else "🔨 Yükselt")
+            }
+            if (b.type == BType.WALL) {
+                val same = g.buildings.count { it.type == BType.WALL && it.level == b.level }
+                if (same > 1) {
+                    OutlinedButton(enabled = to <= GameCatalog.maxLevelAt(b.type, th), onClick = { Game.upgradeWalls(b.level)?.let(Repo::toast) }) {
+                        Text("Hepsi ($same)")
+                    }
+                }
+            }
+        }
     } else if (b.type.cat != BCat.DECOR && b.type != BType.BUILDER_HUT) {
         Text("🏆 En yüksek seviyede", fontWeight = FontWeight.SemiBold)
     }
@@ -298,6 +325,15 @@ private fun statLines(g: GameState, t: BType, level: Int, now: Long, b: GBuildin
         listOf("🎯 Hasar: ${d.dps.roundToInt()}/sn • Menzil: ${d.range}", "❤️ Can: ${GameCatalog.hp(t, level).roundToInt()}")
     }
     BType.LIBRARY -> listOf("📖 Ders parası bonusu: +%${GameCatalog.libraryBonusPercent(level)}")
+    BType.WALL -> listOf("🧱 Sur canı: ${GameCatalog.wallHp(level).roundToInt()}", "Baskın savunmasına +${"%.1f".format(0.5 * level)} katkı")
+    BType.SPELL_FORGE -> listOf(
+        "🧪 Büyü kapasitesi: ${GameCatalog.spellCapacity(level)}",
+        "Açtığı büyü: ${SType.entries.filter { it.forgeLevel <= level }.joinToString { it.title }}",
+    )
+    BType.HERO_ALTAR -> {
+        val m = GameCatalog.heroMultiplier(level)
+        listOf("👑 Komutan Sv $level", "❤️ ${(TType.HERO.hp * m).roundToInt()} can • ⚔️ ${(TType.HERO.dps * m).roundToInt()}/sn")
+    }
     BType.GOLD_MINE -> {
         val rate = GameCatalog.mineRatePerHour(level)
         val stored = if (b != null) " • Depoda: ${Game.mineStored(b, now)}" else ""
@@ -429,8 +465,10 @@ private fun ArmyTab(data: AppData, now: Long) {
         },
         Pane(1.5f) {
             Panel(Modifier.fillMaxWidth(), title = "⚔️ Asker Eğit") {
-                ResponsiveGrid(TType.entries, minItemWidth = 210.dp) { t, mod -> TroopCard(data, t, mod) }
+                ResponsiveGrid(TType.entries.filter { it.trainable }, minItemWidth = 210.dp) { t, mod -> TroopCard(data, t, mod) }
             }
+            Panel(Modifier.fillMaxWidth(), title = "👑 Komutan") { HeroSection(data, now) }
+            Panel(Modifier.fillMaxWidth(), title = "🧪 Büyüler") { SpellSection(data, now) }
             Panel(Modifier.fillMaxWidth(), title = "📚 Akademi") { AcademySection(data) }
         },
     )
@@ -491,7 +529,7 @@ private fun AcademySection(data: AppData) {
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
     }
     val maxLvl = GameCatalog.maxTroopLevel(ac)
-    TType.entries.filter { Game.barracksLevel(g) >= it.barracksLevel }.forEach { t ->
+    TType.entries.filter { it.trainable && Game.barracksLevel(g) >= it.barracksLevel }.forEach { t ->
         val lvl = Game.troopLevel(g, t)
         LabeledControl(
             "${t.title} Sv $lvl",
@@ -522,8 +560,17 @@ private fun CampaignTab(data: AppData, onAttack: (Int) -> Unit, onTrain: () -> U
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("🗺️ Seferler", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        val league = Game.league(g)
+                        val next = League.next(Game.stars(g))
                         Text(
-                            "Ordun: $armySize asker • Toplam ⭐ ${Game.stars(g)} • Zafer: ${g.battlesWon}",
+                            "${league.emoji} ${league.title}" + (if (league.lootBonus > 0) " (+%${league.lootBonus} ganimet)" else "") +
+                                (next?.let { " • ${it.title} için ${it.minStars - Game.stars(g)} ⭐ daha" } ?: ""),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Ordun: $armySize asker" + (if (g.spells.isNotEmpty()) " • ${g.spells.values.sum()} büyü" else "") +
+                                " • Toplam ⭐ ${Game.stars(g)} • Zafer: ${g.battlesWon}",
                             style = MaterialTheme.typography.bodySmall,
                         )
                         Text(
@@ -544,7 +591,10 @@ private fun CampaignTab(data: AppData, onAttack: (Int) -> Unit, onTrain: () -> U
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("$lvl. ${v.name}", fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text("🏰 Sv ${v.th} • 🗼 ${v.defenses} kule • 🏠 ${v.buildings.size} bina", style = MaterialTheme.typography.labelMedium)
+                        Text(
+                            "🏰 Sv ${v.th} • 🗼 ${v.defenses} kule • 🏠 ${v.structures} bina" + if (v.walls > 0) " • 🧱 ${v.walls}" else "",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
                     }
                     Text(
                         "⭐".repeat(stars) + "☆".repeat(3 - stars),
@@ -566,6 +616,131 @@ private fun CampaignTab(data: AppData, onAttack: (Int) -> Unit, onTrain: () -> U
                         enabled = armySize > 0,
                         modifier = Modifier.fillMaxWidth(),
                     ) { Text(if (armySize > 0) "⚔️ Saldır" else "Ordun boş") }
+                }
+            }
+        }
+    }
+}
+
+
+// ====================================================================== Komutan, büyüler, görevler
+
+@Composable
+private fun HeroSection(data: AppData, now: Long) {
+    val g = data.game
+    val sp = rememberSprites()
+    val lvl = Game.heroLevel(g)
+    val altar = g.buildings.find { it.type == BType.HERO_ALTAR }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Image(sp.troop(TType.HERO), "Komutan", Modifier.size(48.dp), filterQuality = FilterQuality.None, alpha = if (lvl > 0) 1f else 0.4f)
+        Spacer(Modifier.width(10.dp))
+        Column(Modifier.weight(1f)) {
+            if (altar == null || altar.level == 0) {
+                Text("Komutan Kürsüsü kur (Merkez Kale 2), kahramanın gelsin.", style = MaterialTheme.typography.bodyMedium)
+                Text("Savaşta tek başına bir ordu gibidir; seviyesini ders çalışarak yükseltirsin.", style = MaterialTheme.typography.labelSmall)
+            } else {
+                val m = GameCatalog.heroMultiplier(lvl)
+                Text("Komutan • Sv $lvl", fontWeight = FontWeight.Bold)
+                Text("❤️ ${(TType.HERO.hp * m).roundToInt()}  ⚔️ ${(TType.HERO.dps * m).roundToInt()}/sn  📯 Savaş Narası", style = MaterialTheme.typography.labelMedium)
+                val status = when {
+                    altar.upgrade != null -> "🔨 Kürsü yükseltiliyor, Komutan savaşa çıkamaz"
+                    now < g.heroReadyAt -> "😴 Dinleniyor: ${((g.heroReadyAt - now) / 60_000L) + 1} dk"
+                    else -> "✅ Savaşa hazır"
+                }
+                Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpellSection(data: AppData, now: Long) {
+    val g = data.game
+    val forge = Game.forgeLevel(g)
+    if (forge < 1) {
+        Text("Büyü Atölyesi kur (Merkez Kale 3): şifa, öfke ve yıldırım büyüleri savaşın gidişatını değiştirir.", style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    Text("Kapasite: ${Game.spellCount(g)} / ${Game.spellCapacity(g)}", style = MaterialTheme.typography.bodySmall)
+    g.spells.entries.sortedBy { it.key.ordinal }.forEach { (s, n) ->
+        Text("${s.emoji} ${s.title} ×$n", fontWeight = FontWeight.SemiBold)
+    }
+    g.spellQueue.forEachIndexed { i, job ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("${job.spell.emoji} ${job.spell.title} ×${job.count} hazırlanıyor", style = MaterialTheme.typography.bodySmall)
+                if (i == 0) {
+                    val p = ((now - g.spellQueueStartedAt).toFloat() / (job.spell.brewSec * 1000f)).coerceIn(0f, 1f)
+                    LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth())
+                }
+            }
+            TextButton(onClick = { Game.cancelBrew(i) }) { Text("✕") }
+        }
+    }
+    HorizontalDivider(Modifier.padding(vertical = 6.dp))
+    SType.entries.forEach { s ->
+        val locked = forge < s.forgeLevel
+        LabeledControl(
+            "${s.emoji} ${s.title}",
+            hint = if (locked) "🔒 Atölye Sv ${s.forgeLevel}" else "${s.description} • ${s.cost} 🪙 • ${s.brewSec} sn",
+        ) {
+            FilledTonalButton(enabled = !locked, onClick = { Game.brew(s, 1)?.let(Repo::toast) }) { Text("+1") }
+        }
+    }
+}
+
+@Composable
+private fun QuestsTab(data: AppData) {
+    val list = Quests.status(data).sortedWith(compareBy({ !it.claimable }, { it.done }))
+    val g = data.game
+    val league = Game.league(g)
+    LazyVerticalGrid(
+        columns = GridCells.Adaptive(260.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.fillMaxSize(),
+    ) {
+        item(span = { GridItemSpan(maxLineSpan) }) {
+            Panel(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(league.emoji, fontSize = 36.sp)
+                    Spacer(Modifier.width(10.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(league.title, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                        val next = League.next(Game.stars(g))
+                        Text(
+                            "⭐ ${Game.stars(g)} yıldız • ganimet bonusu +%${league.lootBonus}" +
+                                (next?.let { "\n${it.emoji} ${it.title}: ${it.minStars} ⭐ (+%${it.lootBonus})" } ?: "\nEn üst ligdesin!"),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            }
+        }
+        items(list, key = { it.quest.id }) { st ->
+            Panel(Modifier.fillMaxWidth()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(st.quest.emoji, fontSize = 26.sp)
+                    Spacer(Modifier.width(8.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            st.quest.title + "  " + "★".repeat(st.claimedTiers) + "☆".repeat(st.quest.tiers.size - st.claimedTiers),
+                            fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        Text(
+                            if (st.done) "Tüm kademeler tamamlandı 🏆" else "${minOf(st.value, st.target)} / ${st.target} ${st.quest.unit} • ödül ${st.reward} 🪙",
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
+                }
+                if (!st.done) {
+                    LinearProgressIndicator(
+                        progress = { (st.value.toFloat() / st.target).coerceIn(0f, 1f) },
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+                    )
+                    Button(onClick = { Game.claimQuest(st.quest.id)?.let(Repo::toast) }, enabled = st.claimable, modifier = Modifier.fillMaxWidth()) {
+                        Text(if (st.claimable) "🎁 Ödülü al (+${st.reward} 🪙)" else "Devam et")
+                    }
                 }
             }
         }

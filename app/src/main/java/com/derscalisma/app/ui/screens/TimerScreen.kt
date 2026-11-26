@@ -130,37 +130,70 @@ private fun TimerPanel(data: AppData, now: Long, onStop: () -> Unit) {
 @Composable
 private fun SessionSettingsPanel(data: AppData, now: Long) {
     val s = data.settings
+    val t = data.timer
     val cs = MaterialTheme.colorScheme
-    Panel(Modifier.fillMaxWidth(), title = "⏱️ Oturum Ayarları") {
-        if (data.timer != null) {
-            Text("Süre ayarları bir sonraki oturumda geçerli olur.", style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+    // Oturum çalışıyorsa değerler doğrudan çalışan oturumdan okunur ve ona uygulanır.
+    val work = t?.workMinutes ?: s.workMinutes
+    val brk = t?.breakMinutes ?: s.breakMinutes
+    val rounds = t?.rounds ?: s.rounds
+    fun apply(w: Int = work, b: Int = brk, r: Int = rounds) {
+        if (t != null) Repo.adjustActiveTimer(w, b, r)
+        else Repo.updateSettings { it.copy(workMinutes = w, breakMinutes = b, rounds = r) }
+    }
+    Panel(Modifier.fillMaxWidth(), title = if (t != null) "⏱️ Aktif Oturum Ayarları" else "⏱️ Oturum Ayarları") {
+        if (t != null) {
+            Text(
+                "Değişiklikler çalışan oturuma hemen uygulanır, geçen süre korunur.",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
         }
         LabeledControl("Çalışma süresi") {
-            Stepper(s.workMinutes, { v -> Repo.updateSettings { it.copy(workMinutes = v) } }, min = 5, max = 180, step = 5, suffix = " dk")
+            Stepper(work, { v -> apply(w = v) }, min = 5, max = 180, step = 5, suffix = " dk")
         }
         LabeledControl("Mola süresi") {
-            Stepper(s.breakMinutes, { v -> Repo.updateSettings { it.copy(breakMinutes = v) } }, min = 0, max = 60, step = 1, suffix = " dk")
+            Stepper(brk, { v -> apply(b = v) }, min = 0, max = 60, step = 1, suffix = " dk")
         }
-        LabeledControl("Tur sayısı") {
-            Stepper(s.rounds, { v -> Repo.updateSettings { it.copy(rounds = v) } }, min = 1, max = 12)
+        LabeledControl("Tur sayısı", hint = if (t != null) "Şu an ${t.round}. turdasın" else null) {
+            Stepper(rounds, { v -> apply(r = v) }, min = t?.round ?: 1, max = 12)
+        }
+        if (t != null) {
+            LabeledControl(if (t.phase == Phase.WORK) "Bu çalışma turunu" else "Bu molayı") {
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    FilledTonalButton(onClick = { Repo.extendPhase(-5) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("−5 dk") }
+                    FilledTonalButton(onClick = { Repo.extendPhase(5) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+5 dk") }
+                }
+            }
         }
         Spacer(Modifier.height(6.dp))
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             presets.forEach { p ->
                 FilterChip(
-                    selected = s.workMinutes == p.work && s.breakMinutes == p.brk && s.rounds == p.rounds,
-                    onClick = { Repo.updateSettings { it.copy(workMinutes = p.work, breakMinutes = p.brk, rounds = p.rounds) } },
+                    selected = work == p.work && brk == p.brk && rounds == p.rounds,
+                    onClick = { apply(p.work, p.brk, maxOf(p.rounds, t?.round ?: 1)) },
                     label = { Text("${p.work}/${p.brk} ×${p.rounds}") },
                 )
             }
         }
-        val workTotal = s.workMinutes * s.rounds
-        val allTotal = workTotal + s.breakMinutes * (s.rounds - 1)
-        Text(
-            "Toplam $workTotal dk çalışma • şimdi başlarsan bitiş ≈ ${Time.timeOf(now + allTotal * MINUTE_MS)}",
-            style = MaterialTheme.typography.bodySmall,
-            color = cs.onSurfaceVariant,
-        )
+        if (t == null) {
+            val workTotal = work * rounds
+            val allTotal = workTotal + brk * (rounds - 1)
+            Text(
+                "Toplam $workTotal dk çalışma • şimdi başlarsan bitiş ≈ ${Time.timeOf(now + allTotal * MINUTE_MS)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+        } else {
+            // Kalan fazların toplamıyla tahmini bitiş
+            val left = if (t.isPaused) (t.pausedRemainingMs ?: 0L) else (t.phaseEndAt - now).coerceAtLeast(0)
+            val rest = (t.rounds - t.round) * (t.workMinutes + t.breakMinutes) * MINUTE_MS -
+                (if (t.phase == Phase.BREAK) t.breakMinutes * MINUTE_MS else 0L)
+            Text(
+                "Oturumun tahmini bitişi ≈ ${Time.timeOf(now + left + rest.coerceAtLeast(0))}" + if (t.isPaused) " (duraklatıldı)" else "",
+                style = MaterialTheme.typography.bodySmall,
+                color = cs.onSurfaceVariant,
+            )
+        }
     }
 }
 

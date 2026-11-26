@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         Repo.foreground = false
+        Repo.backupExternally()
         super.onPause()
     }
 }

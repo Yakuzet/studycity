@@ -131,10 +131,19 @@ private fun DrawScope.drawVillage(
         }
     }
 
+    val wallSet = g.buildings.filter { it.type == BType.WALL }.map { it.x to it.y }.toHashSet()
     g.buildings.sortedBy { it.y + it.type.size }.forEach { b ->
         val s = b.type.size * t
         val x = sx(b.x.toFloat())
         val y = sy(b.y.toFloat())
+        if (b.type == BType.WALL) {
+            val movingWall = ghost != null && selectedId == b.id
+            drawWall(b.level, x, y, t, (b.x + 1 to b.y) in wallSet, (b.x to b.y + 1) in wallSet, alpha = if (movingWall) 0.35f else 1f)
+            if (selectedId == b.id && ghost == null) {
+                drawRoundRect(Color.White.copy(alpha = 0.6f + 0.4f * sin(time * 5f)), Offset(x, y), Size(t, t), cornerRadius = CornerRadius(t * 0.2f), style = Stroke(t * 0.08f))
+            }
+            return@forEach
+        }
         val pad = s * 0.04f
         val img = sp.building(b.type)
         val moving = ghost != null && selectedId == b.id
@@ -214,6 +223,10 @@ private fun DrawScope.drawVillage(
             (if (ghost.ok) Color(0xFF3DDC84) else Color(0xFFFF4D4D)).copy(alpha = 0.35f),
             Offset(x, y), Size(s, s), cornerRadius = CornerRadius(t * 0.15f),
         )
-        drawFit(sp.building(ghost.type), x + s * 0.04f, y + s * 0.04f, s * 0.92f, s * 0.92f, alpha = 0.85f, colorFilter = if (ghost.ok) GhostOk else GhostBad)
+        if (ghost.type == BType.WALL) {
+            drawWall(1, x, y, t, false, false, alpha = 0.85f)
+        } else {
+            drawFit(sp.building(ghost.type), x + s * 0.04f, y + s * 0.04f, s * 0.92f, s * 0.92f, alpha = 0.85f, colorFilter = if (ghost.ok) GhostOk else GhostBad)
+        }
     }
 }

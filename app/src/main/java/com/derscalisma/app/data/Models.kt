@@ -107,9 +107,11 @@ data class TimerState(
     val checksDone: Int = 0,
     val sessionFocusYes: Int = 0,
     val sessionFocusNo: Int = 0,
+    /** Bu faza elle eklenen / çıkarılan süre (+5 dk gibi). Faz değişince sıfırlanır. */
+    val phaseExtraMs: Long = 0,
 ) {
     val isPaused: Boolean get() = pausedRemainingMs != null
-    val phaseTotalMs: Long get() = (if (phase == Phase.WORK) workMinutes else breakMinutes) * MINUTE_MS
+    val phaseTotalMs: Long get() = ((if (phase == Phase.WORK) workMinutes else breakMinutes) * MINUTE_MS + phaseExtraMs).coerceAtLeast(MINUTE_MS / 6)
 }
 
 @Serializable

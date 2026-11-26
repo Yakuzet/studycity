@@ -5,6 +5,7 @@ import com.derscalisma.app.data.game.Game
 import com.derscalisma.app.data.game.GameCatalog
 import com.derscalisma.app.data.game.advanceGame
 import com.derscalisma.app.data.game.migrateOldCity
+import com.derscalisma.app.data.game.processSpells
 import com.derscalisma.app.data.game.processTraining
 import com.derscalisma.app.data.game.raidVillage
 import com.derscalisma.app.notify.AlarmScheduler
@@ -18,7 +19,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.Json
-import java.io.File
 import java.time.LocalDate
 import kotlin.math.roundToInt
 
@@ -38,7 +38,7 @@ object Repo {
     }
     private val lock = Any()
     private lateinit var ctx: Context
-    private lateinit var file: File
+    private lateinit var store: SaveStore
     @Volatile private var initialized = false
 
     private val _state = MutableStateFlow(AppData())
@@ -55,36 +55,68 @@ object Repo {
         synchronized(lock) {
             if (initialized) return
             ctx = context.applicationContext
-            file = File(ctx.filesDir, "data.json")
-            _state.value = load()
+            store = SaveStore(ctx.filesDir, json)
+            _state.value = store.load()
             initialized = true
         }
+        store.recoveryNotice?.let { _messages.tryEmit("💾 $it") }
     }
 
     fun toast(msg: String) {
         _messages.tryEmit(msg)
     }
 
-    // ---------------------------------------------------------------- persistence
+    // ---------------------------------------------------------------- persistence & yedekleme
 
-    private fun load(): AppData {
-        if (!file.exists()) return AppData()
-        return try {
-            json.decodeFromString(AppData.serializer(), file.readText())
+    private fun save(d: AppData) {
+        try {
+            store.save(d, System.currentTimeMillis())
         } catch (e: Exception) {
-            file.renameTo(File(file.parentFile, "data.corrupt.${System.currentTimeMillis()}.json"))
-            AppData()
+            _messages.tryEmit("⚠️ Kayıt yazılamadı: ${e.message}")
         }
     }
 
-    private fun save(d: AppData) {
-        val text = json.encodeToString(AppData.serializer(), d)
-        val tmp = File(file.parentFile, "data.json.tmp")
-        tmp.writeText(text)
-        if (!tmp.renameTo(file)) {
-            file.writeText(text)
-            tmp.delete()
-        }
+    /** Bu açılışta hiç kayıt yoktu (yeni kurulum ya da uygulama silinip kuruldu). */
+    val freshInstall: Boolean get() = initialized && store.freshInstall
+
+    fun dismissFreshInstall() = store.dismissFresh()
+
+    fun exportJson(): String = json.encodeToString(AppData.serializer(), _state.value)
+
+    /** Dışarıdan bir yedeği yükler; mevcut kayıt ayrıca saklanır. Hata varsa mesaj döner. */
+    fun importJson(text: String): String? {
+        val d = store.strict(text) ?: store.lenient(text) ?: return "Bu dosya bir StudyCity yedeği değil ya da okunamadı."
+        restore(d)
+        return null
+    }
+
+    fun restoreFromFile(name: String): String? {
+        val d = store.readFile(name) ?: return "Bu dosya okunamadı."
+        restore(d)
+        return null
+    }
+
+    private fun restore(d: AppData) {
+        store.keepCurrentCopy()
+        store.dismissFresh()
+        mutate { data = d }
+        onAppResume()
+        _messages.tryEmit("💾 Kayıt geri yüklendi: ${d.coins} 🪙, en iyi seri ${d.bestDailyStreak} gün")
+    }
+
+    fun saveFiles(): List<java.io.File> = store.allFiles()
+
+    /** İndirilenler klasörüne otomatik yedek (en fazla 30 dakikada bir, arka planda). */
+    fun backupExternally(force: Boolean = false) {
+        if (!initialized || !ExternalBackup.supported) return
+        if (!force && System.currentTimeMillis() - ExternalBackup.lastBackupAt(ctx) < ExternalBackup.INTERVAL_MS) return
+        val d = _state.value
+        if (d.totalEarned == 0 && d.days.isEmpty()) return // boş kayıtla eski yedeğin üzerine yazma
+        val text = exportJson()
+        Thread {
+            val ok = ExternalBackup.write(ctx, text)
+            if (force) _messages.tryEmit(if (ok) "💾 Yedek İndirilenler/StudyCity klasörüne yazıldı" else "⚠️ Yedek yazılamadı")
+        }.start()
     }
 
     // ---------------------------------------------------------------- transaction
@@ -157,6 +189,7 @@ object Repo {
             pruneFired()
             migrateOldCity()
             processTraining()
+            processSpells()
             val ask = data.focusAsk
             if (ask != null && now - ask.askedAt > 30 * MINUTE_MS) data = data.copy(focusAsk = null)
         }
@@ -167,7 +200,12 @@ object Repo {
 
     fun rescheduleAll() = onAppResume()
 
-    fun runReminders() = mutate {
+    fun runReminders() {
+        runRemindersTx()
+        backupExternally()
+    }
+
+    private fun runRemindersTx() = mutate {
         processRollover()
         catchUp()
         val today = Time.date(now)
@@ -243,6 +281,46 @@ object Repo {
             ),
             lastSession = null,
         )
+    }
+
+    /**
+     * Çalışan oturumun ayarlarını değiştirir. Geçen süre korunur: örneğin 25 dk'lık turun 10. dakikasında
+     * süreyi 40 dk yaparsan kalan 15 dk 30 dk olur. Yeni değerler varsayılan ayar olarak da kaydedilir.
+     */
+    fun adjustActiveTimer(work: Int? = null, brk: Int? = null, rounds: Int? = null) = mutate {
+        catchUp()
+        var t = data.timer ?: return@mutate
+        if (work != null && work != t.workMinutes) {
+            val delta = (work - t.workMinutes) * MINUTE_MS
+            t = t.copy(workMinutes = work)
+            if (t.phase == Phase.WORK) t = shiftPhase(t, delta)
+        }
+        if (brk != null && brk != t.breakMinutes) {
+            val delta = (brk - t.breakMinutes) * MINUTE_MS
+            t = t.copy(breakMinutes = brk)
+            if (t.phase == Phase.BREAK) t = shiftPhase(t, delta)
+        }
+        if (rounds != null) t = t.copy(rounds = rounds.coerceAtLeast(t.round))
+        data = data.copy(
+            timer = t,
+            settings = data.settings.copy(workMinutes = t.workMinutes, breakMinutes = t.breakMinutes, rounds = t.rounds),
+        )
+        catchUp()
+    }
+
+    /** Sadece şu anki fazı uzatır / kısaltır (ayarları değiştirmez). */
+    fun extendPhase(minutes: Int) = mutate {
+        catchUp()
+        val t = data.timer ?: return@mutate
+        val delta = minutes * MINUTE_MS
+        data = data.copy(timer = shiftPhase(t, delta).let { it.copy(phaseExtraMs = it.phaseExtraMs + delta) })
+        catchUp()
+    }
+
+    private fun Tx.shiftPhase(t: TimerState, delta: Long): TimerState {
+        val rem = t.pausedRemainingMs
+        return if (rem != null) t.copy(pausedRemainingMs = (rem + delta).coerceAtLeast(0))
+        else t.copy(phaseEndAt = maxOf(now, t.phaseEndAt + delta))
     }
 
     /** "Dikkatin toplu mu?" sorusunun cevabı. */
@@ -378,17 +456,17 @@ object Repo {
             else if (t.breakMinutes <= 0) t.copy(
                 round = t.round + 1, phase = Phase.WORK, pausedRemainingMs = null,
                 phaseStartedAt = at, phaseEndAt = at + t.workMinutes * MINUTE_MS,
-                nextBeepAt = Focus.nextBeepAt(data.settings, at), checksDone = 0,
+                nextBeepAt = Focus.nextBeepAt(data.settings, at), checksDone = 0, phaseExtraMs = 0,
             )
             else t.copy(
                 phase = Phase.BREAK, pausedRemainingMs = null,
                 phaseStartedAt = at, phaseEndAt = at + t.breakMinutes * MINUTE_MS,
-                nextBeepAt = null, checksDone = 0,
+                nextBeepAt = null, checksDone = 0, phaseExtraMs = 0,
             )
         Phase.BREAK -> t.copy(
             round = t.round + 1, phase = Phase.WORK, pausedRemainingMs = null,
             phaseStartedAt = at, phaseEndAt = at + t.workMinutes * MINUTE_MS,
-            nextBeepAt = Focus.nextBeepAt(data.settings, at), checksDone = 0,
+            nextBeepAt = Focus.nextBeepAt(data.settings, at), checksDone = 0, phaseExtraMs = 0,
         )
     }
 

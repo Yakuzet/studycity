@@ -44,6 +44,9 @@ class Sprites(private val res: Resources) {
         BType.STALL to img(R.drawable.g_stall),
         BType.STATUE to img(R.drawable.g_statue),
         BType.WINDMILL to img(R.drawable.g_mill_base),
+        BType.SPELL_FORGE to img(R.drawable.g_forge),
+        BType.HERO_ALTAR to img(R.drawable.g_altar),
+        BType.WALL to img(R.drawable.g_rock),
     )
     private val troops = mapOf(
         TType.SWORD to img(R.drawable.g_u_sword),
@@ -51,6 +54,8 @@ class Sprites(private val res: Resources) {
         TType.KNIGHT to img(R.drawable.g_u_knight),
         TType.MAGE to img(R.drawable.g_u_mage),
         TType.HEALER to img(R.drawable.g_u_healer),
+        TType.BREAKER to img(R.drawable.g_u_breaker),
+        TType.HERO to img(R.drawable.g_u_hero),
     )
     val millBlades = img(R.drawable.g_mill_blades)
     val fire = img(R.drawable.g_fire)
@@ -153,3 +158,38 @@ val HitFlash = ColorFilter.tint(Color(0x55FFFFFF), BlendMode.SrcAtop)
 val HurtFlash = ColorFilter.tint(Color(0xAAFF3030), BlendMode.SrcAtop)
 val GhostOk = ColorFilter.tint(Color(0x6600FF66), BlendMode.SrcAtop)
 val GhostBad = ColorFilter.tint(Color(0x88FF3030), BlendMode.SrcAtop)
+
+/** Sur rengi seviyeye göre: ahşap, taş, koyu taş, altın süslü, kristal. */
+fun wallColors(level: Int): Pair<Color, Color> = when (level.coerceIn(1, 5)) {
+    1 -> Color(0xFF9A6B3F) to Color(0xFF6E4A28)
+    2 -> Color(0xFFB8BEC6) to Color(0xFF7C838D)
+    3 -> Color(0xFF7D848F) to Color(0xFF4E545D)
+    4 -> Color(0xFF6F7682) to Color(0xFFE0B84A)
+    else -> Color(0xFF7FC8E8) to Color(0xFF3A86B4)
+}
+
+/**
+ * Tek bir sur karosunu çizer. Komşu surlara doğru uzanan bağlantılar sayesinde surlar kesintisiz görünür.
+ * [left]/[top] karonun sol üst köşesi, [t] karo boyutu (piksel).
+ */
+fun DrawScope.drawWall(level: Int, left: Float, top: Float, t: Float, right: Boolean, down: Boolean, damaged: Float = 0f, alpha: Float = 1f) {
+    val (body, edge) = wallColors(level)
+    val inset = t * 0.18f
+    val w = t - inset * 2
+    val corner = androidx.compose.ui.geometry.CornerRadius(t * 0.12f)
+    // gölge
+    drawRoundRect(Color(0x40000000).copy(alpha = 0.25f * alpha), Offset(left + inset, top + inset + t * 0.08f), androidx.compose.ui.geometry.Size(w, w), corner)
+    if (right) drawRect(body.copy(alpha = alpha), Offset(left + t / 2f, top + inset + w * 0.15f), androidx.compose.ui.geometry.Size(t, w * 0.7f))
+    if (down) drawRect(body.copy(alpha = alpha), Offset(left + inset + w * 0.15f, top + t / 2f), androidx.compose.ui.geometry.Size(w * 0.7f, t))
+    drawRoundRect(body.copy(alpha = alpha), Offset(left + inset, top + inset), androidx.compose.ui.geometry.Size(w, w), corner)
+    drawRoundRect(edge.copy(alpha = alpha), Offset(left + inset, top + inset), androidx.compose.ui.geometry.Size(w, w), corner,
+        style = androidx.compose.ui.graphics.drawscope.Stroke(t * 0.06f))
+    // tuğla çizgileri
+    val line = edge.copy(alpha = 0.6f * alpha)
+    drawLine(line, Offset(left + inset, top + t / 2f), Offset(left + t - inset, top + t / 2f), strokeWidth = t * 0.04f)
+    drawLine(line, Offset(left + t / 2f, top + inset), Offset(left + t / 2f, top + t / 2f), strokeWidth = t * 0.04f)
+    if (damaged > 0f) {
+        drawLine(Color(0xAA2B1B0E), Offset(left + inset * 1.5f, top + inset * 1.4f), Offset(left + t * 0.62f, top + t * 0.55f), strokeWidth = t * 0.05f * damaged)
+        drawLine(Color(0xAA2B1B0E), Offset(left + t * 0.62f, top + t * 0.55f), Offset(left + t * 0.7f, top + t - inset), strokeWidth = t * 0.05f * damaged)
+    }
+}

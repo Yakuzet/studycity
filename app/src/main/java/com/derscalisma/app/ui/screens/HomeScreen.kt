@@ -37,6 +37,7 @@ fun HomeScreen(data: AppData, now: Long, onStart: () -> Unit) {
 
     AdaptiveColumns(
         Pane(1f) {
+            FreshInstallCard()
             Panel(Modifier.fillMaxWidth()) {
                 Column(
                     Modifier.fillMaxWidth(),

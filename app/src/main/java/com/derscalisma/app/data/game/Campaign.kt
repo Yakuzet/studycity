@@ -11,7 +11,9 @@ data class EnemyVillage(
     val buildings: List<EnemyBuilding>,
     val loot: Int,
 ) {
-    val defenses get() = buildings.count { it.type.cat == BCat.DEFENSE }
+    val defenses get() = buildings.count { it.type.cat == BCat.DEFENSE && it.type != BType.WALL }
+    val walls get() = buildings.count { it.type == BType.WALL }
+    val structures get() = buildings.count { it.type != BType.WALL }
 }
 
 /** Sefer haritası: her seviye sabit tohumla üretilir, yani her seferinde aynı köy çıkar. */
@@ -78,6 +80,26 @@ object Campaign {
         if (level >= 4) place(BType.LIBRARY, other, 4, 20)
         repeat((2 + level / 5).coerceAtMost(6)) { place(BType.HOUSE, 1, 4, 20) }
         repeat(1 + level / 12) { place(BType.BUILDER_HUT, 1, 4, 20) }
+
+        // Surlar: savunmaların etrafında bir halka (3+), Merkez Kale çevresinde iç halka (12+).
+        val wallLevel = (1 + (level - 1) / 6).coerceAtMost(5)
+        fun ring(x0: Int, y0: Int, x1: Int, y1: Int) {
+            val a = x0.coerceIn(2, VILLAGE_SIZE - 3)
+            val b = y0.coerceIn(2, VILLAGE_SIZE - 3)
+            val c = x1.coerceIn(2, VILLAGE_SIZE - 3)
+            val d = y1.coerceIn(2, VILLAGE_SIZE - 3)
+            for (i in a..c) for (j in b..d) {
+                if ((i == a || i == c || j == b || j == d) && !occ[i][j]) {
+                    occ[i][j] = true
+                    list += EnemyBuilding(BType.WALL, wallLevel, i, j)
+                }
+            }
+        }
+        if (level >= 12) ring(9, 9, 13, 13)
+        if (level >= 3) {
+            val core = list.filter { it.type == BType.TOWN_HALL || (it.type.cat == BCat.DEFENSE && it.type != BType.WALL) }
+            ring(core.minOf { it.x } - 1, core.minOf { it.y } - 1, core.maxOf { it.x + it.type.size }, core.maxOf { it.y + it.type.size })
+        }
 
         return EnemyVillage(level, names[(level - 1) % names.size], th, list, loot = 150 + 60 * level)
     }
