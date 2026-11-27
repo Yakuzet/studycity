@@ -23,6 +23,28 @@ object Rewards {
     val milestones = mapOf(
         3 to 100, 7 to 300, 14 to 600, 30 to 1500, 60 to 3000, 100 to 6000, 365 to 20000,
     )
+
+    // ---- v1.5: ek süre, mola kuralları, cezalar
+    /** Ek sürede (tur bittikten sonra soruyu bitirirken) çalışılan her dakika: normalin 2 katı. */
+    const val OVERTIME_COINS_PER_MINUTE = 2
+    /** Bir turda en fazla ek süre (kronometre bu sürede kendiliğinden biter). */
+    const val MAX_OVERTIME_MIN = 60
+    /** Tur bittikten sonra bu süre içinde ek süre seçilirse, aradaki süre de çalışma sayılır. */
+    const val OVERTIME_BACKDATE_MS = 3 * MINUTE_MS
+    /** Molayı erken bitirince kullanılmayan her tam dakika için. */
+    const val EARLY_RETURN_PER_MIN = 2
+    /** Mola bundan önce atlanırsa (oran) dinlenmemiş sayılır: erken dönüş ödülü yok, sıradaki tur yorgun. */
+    const val BREAK_MIN_FRACTION = 0.5f
+    /** Yorgun turda dakika ödülü yüzdesi. */
+    const val FATIGUE_PERCENT = 50
+    /** Mola uzatma: her biri +5 dk. */
+    const val BREAK_EXTENSION_MIN = 5
+    /** Bir oturumda en fazla mola uzatma. */
+    const val MAX_BREAK_EXTENSIONS = 3
+    /** Mola uzatma ücreti: 15, 30, 60 (her seferinde iki katı). */
+    fun breakExtensionPrice(used: Int) = 15 shl used.coerceIn(0, 6)
+    /** Yanıtsız kalıp sebep belirtmeyince alınan ceza (mola ücretine ek). */
+    const val AWAY_FINE = 20
 }
 
 data class Building(

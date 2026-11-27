@@ -5,6 +5,13 @@ import kotlin.random.Random
 
 /** Dikkat toplama sistemi: bip zamanlaması, tur içi soru noktaları ve yüzdeler. */
 object Focus {
+    /** Cevapsız kalan sorudan sonra tekrar sorma aralığı. */
+    const val REASK_MS = 45_000L
+    /** Zincirdeki en fazla soru: sonuncusu da cevapsız kalırsa süre geri alınır ve duraklatılır. */
+    const val MAX_ATTEMPTS = 4
+    /** Cevap süresi ayarının sınırları (sn). */
+    const val MIN_ANSWER_SEC = 5
+    const val MAX_ANSWER_SEC = 60
 
     /** [from] anından sonraki bip zamanı; bip kapalıysa null. Rastgele modda dakika kesirli seçilir. */
     fun nextBeepAt(s: Settings, from: Long): Long? {

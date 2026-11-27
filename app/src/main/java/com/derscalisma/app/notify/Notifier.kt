@@ -8,13 +8,15 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.drawable.Icon
 import com.derscalisma.app.R
+import com.derscalisma.app.data.FocusAsk
 import com.derscalisma.app.data.Phase
 import com.derscalisma.app.data.PhaseEvent
 import com.derscalisma.app.data.PhaseEventKind
-import com.derscalisma.app.data.Time
+import com.derscalisma.app.data.Settings
 import com.derscalisma.app.data.TimerState
+import com.derscalisma.app.i18n.Fmt
+import com.derscalisma.app.i18n.S
 import com.derscalisma.app.ui.MainActivity
-import java.util.concurrent.atomic.AtomicInteger
 
 object Notifier {
     private const val CH_TIMER = "timer"
@@ -26,29 +28,30 @@ object Notifier {
     private const val ID_TIMER = 1
     private const val ID_PHASE = 2
     private const val ID_FOCUS = 3
-    private val nextId = AtomicInteger(100)
 
+    /** Kanalları oluşturur; dil değişince adları güncellemek için yeniden çağrılır. */
     fun createChannels(ctx: Context) {
+        val n = S.notify
         val nm = ctx.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannels(
             listOf(
-                NotificationChannel(CH_TIMER, "Zamanlayıcı", NotificationManager.IMPORTANCE_LOW).apply {
-                    description = "Çalışırken kalan süreyi gösterir"
+                NotificationChannel(CH_TIMER, n.chTimer, NotificationManager.IMPORTANCE_LOW).apply {
+                    description = n.chTimerDesc
                     setShowBadge(false)
                 },
-                NotificationChannel(CH_PHASE, "Çalışma / Mola geçişleri", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Mola ve çalışma başladığında uyarır"
+                NotificationChannel(CH_PHASE, n.chPhase, NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = n.chPhaseDesc
                     enableVibration(true)
                 },
-                NotificationChannel(CH_REMIND, "Hatırlatmalar ve seri uyarıları", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "Ders saati başladı, serini kaybetmek üzeresin gibi uyarılar"
+                NotificationChannel(CH_REMIND, n.chRemind, NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = n.chRemindDesc
                     enableVibration(true)
                 },
-                NotificationChannel(CH_REWARD, "Ödüller", NotificationManager.IMPORTANCE_DEFAULT).apply {
-                    description = "Hedef ve seri ödülleri"
+                NotificationChannel(CH_REWARD, n.chReward, NotificationManager.IMPORTANCE_DEFAULT).apply {
+                    description = n.chRewardDesc
                 },
-                NotificationChannel(CH_FOCUS, "Dikkat kontrolü", NotificationManager.IMPORTANCE_HIGH).apply {
-                    description = "\"Dikkatin toplu mu?\" soruları"
+                NotificationChannel(CH_FOCUS, n.chFocus, NotificationManager.IMPORTANCE_HIGH).apply {
+                    description = n.chFocusDesc
                     enableVibration(true)
                 },
             )
@@ -79,40 +82,62 @@ object Notifier {
 
     private fun nm(ctx: Context) = ctx.getSystemService(NotificationManager::class.java)
 
-    fun timerOngoing(ctx: Context, t: TimerState?) {
+    /** Her bildirime ayrı kimlik: süreç yeniden başlasa da okunmamış uyarıların üstüne yazılmaz. */
+    private fun uniqueId(): Int = (System.currentTimeMillis() % 1_000_000_000L).toInt() + 1000
+
+    fun timerOngoing(ctx: Context, t: TimerState?, s: Settings) {
         if (t == null) {
             nm(ctx).cancel(ID_TIMER)
             return
         }
-        val phase = if (t.phase == Phase.WORK) "📖 Çalışma" else "☕ Mola"
+        val n = S.notify
+        val phase = if (t.phase == Phase.WORK) n.phaseWork else n.phaseBreak
         val b = builder(ctx, CH_TIMER)
-            .setContentTitle("$phase • Tur ${t.round}/${t.rounds}")
+            .setContentTitle("$phase • ${S.common.roundOf(t.round, t.rounds)}")
             .setOngoing(true)
             .setAutoCancel(false)
             .setOnlyAlertOnce(true)
             .setCategory(Notification.CATEGORY_PROGRESS)
         val paused = t.pausedRemainingMs
-        if (paused != null) {
-            b.setContentText("⏸ Duraklatıldı • Kalan ${Time.clock(paused)}")
-                .setShowWhen(false)
-                .addAction(timerAction(ctx, TimerReceiver.ACTION_RESUME, "Devam et"))
-        } else {
-            b.setContentText("Bitiş: ${Time.timeOf(t.phaseEndAt)}")
-                .setWhen(t.phaseEndAt)
-                .setShowWhen(true)
-                .setUsesChronometer(true)
-                .setChronometerCountDown(true)
-                .addAction(timerAction(ctx, TimerReceiver.ACTION_PAUSE, "Duraklat"))
+        when {
+            t.waiting -> {
+                b.setContentText(if (t.phase == Phase.WORK) n.waitingAfterWork else n.waitingAfterBreak).setShowWhen(false)
+                if (t.phase == Phase.WORK) b.addAction(timerAction(ctx, TimerReceiver.ACTION_OVERTIME, n.actionOvertime5))
+                b.addAction(timerAction(ctx, TimerReceiver.ACTION_NEXT, if (t.phase == Phase.WORK) n.actionStartBreak else n.actionStartWork))
+            }
+            paused != null -> {
+                b.setContentText(n.pausedRemaining(Fmt.clock(paused)))
+                    .setShowWhen(false)
+                    .addAction(timerAction(ctx, TimerReceiver.ACTION_RESUME, n.actionResume))
+            }
+            t.stopwatch -> {
+                b.setContentText(n.stopwatchRunning)
+                    .setWhen(t.phaseEndAt - com.derscalisma.app.data.Rewards.MAX_OVERTIME_MIN * com.derscalisma.app.data.MINUTE_MS)
+                    .setShowWhen(true)
+                    .setUsesChronometer(true)
+                    .addAction(timerAction(ctx, TimerReceiver.ACTION_NEXT, n.actionFinishOvertime))
+            }
+            else -> {
+                b.setContentText(n.endsAt(Fmt.time(t.phaseEndAt)))
+                    .setWhen(t.phaseEndAt)
+                    .setShowWhen(true)
+                    .setUsesChronometer(true)
+                    .setChronometerCountDown(true)
+                    .addAction(timerAction(ctx, TimerReceiver.ACTION_PAUSE, n.actionPause))
+            }
         }
-        b.addAction(timerAction(ctx, TimerReceiver.ACTION_STOP, "Bitir"))
+        b.addAction(timerAction(ctx, TimerReceiver.ACTION_STOP, n.actionStop))
         nm(ctx).notify(ID_TIMER, b.build())
     }
 
     fun phase(ctx: Context, e: PhaseEvent) {
+        val n = S.notify
         val (title, text) = when (e.kind) {
-            PhaseEventKind.BREAK_START -> "☕ Mola zamanı!" to "${e.minutes} dk dinlen. Tur ${e.round}/${e.rounds} tamamlandı."
-            PhaseEventKind.WORK_START -> "📖 Çalışma zamanı!" to "Tur ${e.round}/${e.rounds} başladı, ${e.minutes} dk odaklan."
-            PhaseEventKind.FINISHED -> "🎉 Oturum bitti!" to "Toplam ${e.minutes} dk çalıştın. Sayfa ve soru ilerlemeni kaydetmeyi unutma."
+            PhaseEventKind.BREAK_START -> n.breakStartTitle to n.breakStartText(e.minutes, e.round, e.rounds)
+            PhaseEventKind.WORK_START -> n.workStartTitle to n.workStartText(e.round, e.rounds, e.minutes)
+            PhaseEventKind.ROUND_END -> n.roundEndTitle to n.roundEndText
+            PhaseEventKind.BREAK_END -> n.breakEndTitle to n.breakEndText
+            PhaseEventKind.FINISHED -> n.finishedTitle to n.finishedText(e.minutes)
         }
         nm(ctx).notify(
             ID_PHASE,
@@ -124,24 +149,23 @@ object Notifier {
         )
     }
 
-    fun focusAsk(ctx: Context) {
-        nm(ctx).notify(
-            ID_FOCUS,
-            builder(ctx, CH_FOCUS)
-                .setContentTitle("🎯 Dikkatin toplu mu?")
-                .setContentText("Şu an gerçekten derse mi odaklısın? Dürüstçe cevapla.")
-                .setCategory(Notification.CATEGORY_REMINDER)
-                .addAction(timerAction(ctx, TimerReceiver.ACTION_FOCUS_YES, "✅ Evet, odaklıyım"))
-                .addAction(timerAction(ctx, TimerReceiver.ACTION_FOCUS_NO, "💭 Hayır, dağıldım"))
-                .build()
-        )
+    fun focusAsk(ctx: Context, a: FocusAsk, s: Settings) {
+        val n = S.notify
+        val b = builder(ctx, CH_FOCUS)
+            .setContentTitle(if (a.attempt >= 2) n.focusAgainTitle else n.focusTitle)
+            .setContentText(if (a.attempt >= 2) n.focusAgainText else n.focusText)
+            .setCategory(Notification.CATEGORY_REMINDER)
+            .addAction(timerAction(ctx, TimerReceiver.ACTION_FOCUS_YES, n.focusYes))
+            .addAction(timerAction(ctx, TimerReceiver.ACTION_FOCUS_NO, n.focusNo))
+        if (a.expiresAt > 0) b.setTimeoutAfter((a.expiresAt - System.currentTimeMillis()).coerceAtLeast(1000))
+        nm(ctx).notify(ID_FOCUS, b.build())
     }
 
     fun cancelFocusAsk(ctx: Context) = nm(ctx).cancel(ID_FOCUS)
 
     fun alert(ctx: Context, title: String, text: String) {
         nm(ctx).notify(
-            nextId.incrementAndGet(),
+            uniqueId(),
             builder(ctx, CH_REMIND)
                 .setContentTitle(title)
                 .setContentText(text)
@@ -153,9 +177,9 @@ object Notifier {
 
     fun reward(ctx: Context, text: String) {
         nm(ctx).notify(
-            nextId.incrementAndGet(),
+            uniqueId(),
             builder(ctx, CH_REWARD)
-                .setContentTitle("🏆 Ödül kazandın")
+                .setContentTitle(S.notify.rewardTitle)
                 .setContentText(text)
                 .setStyle(Notification.BigTextStyle().bigText(text))
                 .build()

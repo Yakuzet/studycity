@@ -10,6 +10,16 @@ import android.os.Vibrator
 
 /** Dikkat toplama bipi: kısa çift bip + isteğe bağlı titreşim. */
 object Beeper {
+    /** Uygulama açıkken: kısa (faz değişimi) ya da çift (dikkat sorusu) titreşim. */
+    fun vibrate(ctx: Context, short: Boolean) {
+        try {
+            val v = ctx.getSystemService(Vibrator::class.java) ?: return
+            if (short) v.vibrate(VibrationEffect.createOneShot(60, VibrationEffect.DEFAULT_AMPLITUDE))
+            else v.vibrate(VibrationEffect.createWaveform(longArrayOf(0, 180, 120, 180), -1))
+        } catch (_: Exception) {
+        }
+    }
+
     fun beep(ctx: Context, vibrate: Boolean) {
         try {
             val tg = ToneGenerator(AudioManager.STREAM_ALARM, 85)

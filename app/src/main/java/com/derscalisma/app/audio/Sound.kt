@@ -41,6 +41,32 @@ enum class Music(val res: Int, val loop: Boolean) {
     BATTLE(R.raw.music_battle, true),
 }
 
+/** Arayüz sesleri (koddan sentezlendi: tools/music/study.py). */
+enum class Cue(val res: Int, val minGapMs: Long = 80) {
+    WORK_START(R.raw.cue_work_start),
+    BREAK_START(R.raw.cue_break_start),
+    ROUND_END(R.raw.cue_round_end),
+    SESSION_DONE(R.raw.cue_session_done),
+    FOCUS_ASK(R.raw.cue_focus_ask),
+    FOCUS_WARN(R.raw.cue_focus_warn),
+    COIN(R.raw.cue_coin, 35),
+    STREAK(R.raw.cue_streak),
+    POP(R.raw.cue_pop, 40),
+}
+
+/** Çalışma müzikleri. id ayarlarda saklanır. */
+enum class StudyTrack(val id: String, val res: Int) {
+    LOFI("lofi", R.raw.music_study_lofi),
+    RAIN("rain", R.raw.music_study_rain),
+    PIANO("piano", R.raw.music_study_piano),
+    FOREST("forest", R.raw.music_study_forest),
+    BROWN("brown", R.raw.music_study_brown);
+
+    companion object {
+        fun of(id: String): StudyTrack? = entries.find { it.id == id }
+    }
+}
+
 enum class Jingle(val res: Int) {
     VICTORY(R.raw.jingle_victory),
     DEFEAT(R.raw.jingle_defeat),
@@ -53,6 +79,11 @@ object Sound {
     private var pool: SoundPool? = null
     private val ids = HashMap<Sfx, Int>()
     private val lastPlayed = HashMap<Sfx, Long>()
+    private val cueIds = HashMap<Cue, Int>()
+    private val cueLast = HashMap<Cue, Long>()
+    private var study: MediaPlayer? = null
+    private var studyTrack: StudyTrack? = null
+    private var wantedStudy: StudyTrack? = null
     private var music: MediaPlayer? = null
     private var musicTrack: Music? = null
     private var wanted: Music? = null
@@ -66,6 +97,7 @@ object Sound {
         set(value) {
             field = value
             music?.setVolume(value, value)
+            study?.setVolume(value, value)
         }
 
     fun init(context: Context) {
@@ -77,6 +109,7 @@ object Sound {
             .build()
         val p = SoundPool.Builder().setMaxStreams(10).setAudioAttributes(attrs).build()
         Sfx.entries.forEach { ids[it] = p.load(context, it.res, 1) }
+        Cue.entries.forEach { cueIds[it] = p.load(context, it.res, 1) }
         pool = p
     }
 
@@ -86,7 +119,12 @@ object Sound {
         musicVolume = musicVol / 100f
         if (musicOn != musicEnabled) {
             musicOn = musicEnabled
-            if (!musicEnabled) stopMusicPlayer() else wanted?.let { startMusic(it) }
+            if (!musicEnabled) {
+                stopMusicPlayer()
+                stopStudy()
+            } else {
+                wantedStudy?.let { startStudy(it) } ?: wanted?.let { startMusic(it) }
+            }
         }
     }
 
@@ -100,6 +138,54 @@ object Sound {
         p.play(ids[s] ?: return, v, v, 1, 0, rate.coerceIn(0.5f, 2f))
     }
 
+    /** Arayüz sesi. [rate] ile perde değişir (para sesleri için). */
+    fun cue(c: Cue, volume: Float = 1f, rate: Float = 1f) {
+        if (!sfxOn || paused) return
+        val p = pool ?: return
+        val now = SystemClock.uptimeMillis()
+        if (now - (cueLast[c] ?: 0L) < c.minGapMs) return
+        cueLast[c] = now
+        val v = (sfxVolume * volume).coerceIn(0f, 1f)
+        p.play(cueIds[c] ?: return, v, v, 2, 0, rate.coerceIn(0.5f, 2f))
+    }
+
+    /**
+     * Çalışma müziği (null = sus). Çalarken sahne müziğinin (köy, savaş) önüne geçer;
+     * susunca sahne müziği kaldığı yerden devam eder.
+     */
+    fun studyMusic(track: StudyTrack?) {
+        wantedStudy = track
+        if (track == null || !musicOn) {
+            stopStudy()
+            if (!paused) wanted?.let { if (music == null && musicOn) startMusic(it) else music?.start() }
+            return
+        }
+        if (paused) return
+        if (studyTrack == track && study?.isPlaying == true) return
+        startStudy(track)
+    }
+
+    private fun startStudy(track: StudyTrack) {
+        val c = ctx ?: return
+        stopStudy()
+        music?.takeIf { it.isPlaying }?.pause()
+        val mp = MediaPlayer.create(c, track.res) ?: return
+        mp.isLooping = true
+        mp.setVolume(musicVolume, musicVolume)
+        mp.start()
+        study = mp
+        studyTrack = track
+    }
+
+    private fun stopStudy() {
+        study?.run {
+            runCatching { stop() }
+            release()
+        }
+        study = null
+        studyTrack = null
+    }
+
     /** İstenen müziği çalar (null = sus). Aynı parça zaten çalıyorsa dokunmaz. */
     fun music(track: Music?) {
         wanted = track
@@ -107,7 +193,7 @@ object Sound {
             stopMusicPlayer()
             return
         }
-        if (!musicOn || paused) return
+        if (!musicOn || paused || study != null) return
         if (musicTrack == track && music?.isPlaying == true) return
         startMusic(track)
     }
@@ -143,22 +229,31 @@ object Sound {
         jinglePlayer = mp
         // Müzik varsa ezgi süresince kıs.
         music?.setVolume(musicVolume * 0.3f, musicVolume * 0.3f)
+        study?.setVolume(musicVolume * 0.3f, musicVolume * 0.3f)
         mp.setOnCompletionListener {
             it.release()
             if (jinglePlayer === it) jinglePlayer = null
             music?.setVolume(musicVolume, musicVolume)
+            study?.setVolume(musicVolume, musicVolume)
         }
     }
 
     fun onPause() {
         paused = true
         music?.takeIf { it.isPlaying }?.pause()
+        study?.takeIf { it.isPlaying }?.pause()
     }
 
     fun onResume() {
         paused = false
+        if (!musicOn) return
+        val ws = wantedStudy
+        if (ws != null) {
+            if (studyTrack == ws && study != null) study?.start() else startStudy(ws)
+            return
+        }
         val w = wanted
-        if (w != null && musicOn) {
+        if (w != null) {
             if (musicTrack == w && music != null) music?.start() else startMusic(w)
         }
     }

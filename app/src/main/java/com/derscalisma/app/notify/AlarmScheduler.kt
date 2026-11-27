@@ -6,9 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import com.derscalisma.app.data.AppData
-import com.derscalisma.app.data.Focus
-import com.derscalisma.app.data.Settings
-import com.derscalisma.app.data.TimerState
 
 object AlarmScheduler {
     private const val RC_TIMER = 10
@@ -19,10 +16,11 @@ object AlarmScheduler {
         return Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()
     }
 
-    /** Faz sonu, dikkat bipi ve ara soru: hangisi önce geliyorsa ona alarm kurar. */
-    fun syncTimer(ctx: Context, t: TimerState?, s: Settings) {
-        if (t == null || t.isPaused) cancel(ctx, RC_TIMER, TimerReceiver::class.java)
-        else set(ctx, RC_TIMER, Focus.nextEventAt(t, s), TimerReceiver::class.java)
+    /** Faz sonu, otomatik geçiş, dikkat bipi ve soru süreleri: hangisi önce geliyorsa ona alarm kurar. */
+    fun syncTimer(ctx: Context, d: AppData) {
+        val at = com.derscalisma.app.data.nextEventAt(d)
+        if (at == null) cancel(ctx, RC_TIMER, TimerReceiver::class.java)
+        else set(ctx, RC_TIMER, at, TimerReceiver::class.java)
     }
 
     fun scheduleReminders(ctx: Context, data: AppData, now: Long) {

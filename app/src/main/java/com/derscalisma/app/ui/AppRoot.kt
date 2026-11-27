@@ -25,8 +25,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.derscalisma.app.data.AppData
 import com.derscalisma.app.data.Catalog
-import com.derscalisma.app.data.Focus
+import com.derscalisma.app.data.Phase
 import com.derscalisma.app.data.Repo
+import com.derscalisma.app.data.nextEventAt
+import com.derscalisma.app.ui.rewards.*
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import com.derscalisma.app.ui.game.BattleScreen
 import com.derscalisma.app.ui.game.CityScreen
 import com.derscalisma.app.ui.screens.*
@@ -61,9 +65,25 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
     val cs = MaterialTheme.colorScheme
 
     // Uygulama açıkken faz sonu, bip ve ara soruları anında işle.
+    // Sıradaki olay (faz sonu, otomatik geçiş, soru süresi) geldiyse hemen işle.
     LaunchedEffect(now) {
-        if (timer != null && !timer.isPaused && now >= Focus.nextEventAt(timer, data.settings)) Repo.tick()
+        val at = nextEventAt(data)
+        if (at != null && now >= at) Repo.tick()
     }
+    // Oturum dışında kazanılan paralar alttan bakiyeye uçar.
+    DisposableEffect(Unit) {
+        Repo.onEarned = { CoinFx.burst(it) }
+        onDispose { Repo.onEarned = null }
+    }
+    // Çalışma müziği: çalışırken (ve istenirse molada) seçili parça.
+    val st = data.settings
+    val track = com.derscalisma.app.audio.StudyTrack.of(st.studyMusic)
+    val playStudy = track != null && timer != null && !timer.isPaused &&
+        (timer.phase == Phase.WORK && !timer.waiting || st.studyMusicInBreak)
+    LaunchedEffect(playStudy, track) {
+        com.derscalisma.app.audio.Sound.studyMusic(if (playStudy) track else null)
+    }
+    var wallet by remember { mutableStateOf(false) }
 
     val view = LocalView.current
     val keepOn = data.settings.keepScreenOn && timer != null && !timer.isPaused
@@ -89,7 +109,10 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
         LocalHasBackground provides (bg != null),
         LocalContentColor provides cs.onBackground,
     ) {
-        Box(Modifier.fillMaxSize().background(cs.background)) {
+        Box(Modifier.fillMaxSize().background(cs.background).onGloballyPositioned {
+            val b = it.boundsInRoot()
+            CoinFx.bottom = androidx.compose.ui.geometry.Offset(b.center.x, b.bottom - 120f)
+        }) {
             if (bg != null) {
                 Image(
                     painter = painterResource(bg.image),
@@ -111,7 +134,7 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
                     BattleScreen(level, data) { battleLevel = null }
                 } else if (useRail) {
                     Row(Modifier.fillMaxSize()) {
-                        NavRail(screen, data.coins) { selected = it }
+                        NavRail(screen, data, { wallet = true }) { selected = it }
                         ContentArea(
                             Modifier.weight(1f).fillMaxHeight()
                                 .padding(start = 8.dp, top = 12.dp, end = 14.dp, bottom = 12.dp)
@@ -119,7 +142,7 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
                     }
                 } else {
                     Column(Modifier.fillMaxSize()) {
-                        TopBar(screen, data.coins)
+                        TopBar(screen, data) { wallet = true }
                         ContentArea(
                             Modifier.weight(1f).fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
                         ) { ScreenContent(screen, data, now, onStart, onAttack) }
@@ -131,15 +154,21 @@ fun AppRoot(data: AppData, initialScreen: Screen = Screen.HOME) {
                 snackbar,
                 Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(bottom = 60.dp),
             )
+            val session = data.lastSession
+            val cel = data.celebration
+            when {
+                session != null && battleLevel == null -> SessionSummaryOverlay(data, session)
+                cel != null -> StreakCelebration(data, cel) { Repo.dismissCelebration() }
+            }
+            val ask = data.focusAsk
+            if (ask != null && ask.visible && now >= ask.askedAt) {
+                FocusAskBanner(ask, now, Modifier.align(Alignment.TopCenter).windowInsetsPadding(WindowInsets.safeDrawing).padding(top = 64.dp))
+            }
+            CoinFlightCanvas(CoinFx.flight)
         }
     }
-
-    val session = data.lastSession
-    if (data.focusAsk != null) {
-        FocusDialog()
-    } else if (session != null && data.goals.isNotEmpty()) {
-        SessionLogDialog(data, session)
-    }
+    data.away?.let { AwayDialog(data, it) }
+    if (wallet) WalletSheet(data) { wallet = false }
 }
 
 @Composable
@@ -164,19 +193,9 @@ private fun ScreenContent(screen: Screen, data: AppData, now: Long, onStart: () 
     }
 }
 
-@Composable
-private fun FocusDialog() {
-    AlertDialog(
-        onDismissRequest = {},
-        title = { Text("🎯 Dikkatin toplu mu?") },
-        text = { Text("Şu an gerçekten derse mi odaklısın, yoksa aklın başka yerde mi? Dürüst cevap ver, dikkat yüzden buna göre hesaplanır.") },
-        confirmButton = { Button(onClick = { Repo.answerFocus(true) }) { Text("✅ Evet, odaklıyım") } },
-        dismissButton = { OutlinedButton(onClick = { Repo.answerFocus(false) }) { Text("💭 Dağıldım") } },
-    )
-}
 
 @Composable
-private fun NavRail(current: Screen, coins: Int, onSelect: (Screen) -> Unit) {
+private fun NavRail(current: Screen, data: AppData, onWallet: () -> Unit, onSelect: (Screen) -> Unit) {
     val cs = MaterialTheme.colorScheme
     Column(
         Modifier
@@ -187,7 +206,7 @@ private fun NavRail(current: Screen, coins: Int, onSelect: (Screen) -> Unit) {
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("🪙 $coins", fontWeight = FontWeight.Bold, color = cs.tertiary, fontSize = 14.sp, maxLines = 1)
+        BalancePill(data, onWallet)
         Spacer(Modifier.height(6.dp))
         visibleScreens.forEach { s ->
             val sel = s == current
@@ -216,7 +235,7 @@ private fun NavRail(current: Screen, coins: Int, onSelect: (Screen) -> Unit) {
 }
 
 @Composable
-private fun TopBar(current: Screen, coins: Int) {
+private fun TopBar(current: Screen, data: AppData, onWallet: () -> Unit) {
     val cs = MaterialTheme.colorScheme
     Row(
         Modifier.fillMaxWidth().background(panelColor()).padding(horizontal = 16.dp, vertical = 10.dp),
@@ -230,7 +249,7 @@ private fun TopBar(current: Screen, coins: Int) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        Text("🪙 $coins", fontWeight = FontWeight.Bold, color = cs.tertiary)
+        BalancePill(data, onWallet)
     }
 }
 

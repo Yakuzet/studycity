@@ -83,7 +83,7 @@ private fun DeadlineCard(data: AppData, st: DeadlineStatus, compact: Boolean, on
         Column(Modifier.fillMaxWidth().padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(g.title, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text("${st.pace.emoji} ${st.pace.title}", color = paceColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                Text(paceLabel(st.pace), color = paceColor, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
             }
             Text(
                 "${st.done} / ${g.total} ${g.unit} • son gün ${prettyDate(g.dueDate)}" +
@@ -136,7 +136,7 @@ private fun DeadlineCard(data: AppData, st: DeadlineStatus, compact: Boolean, on
                     }
                     val linked = data.goals.find { it.id == g.linkedGoalId }
                     if (linked != null && st.pace != Pace.DONE && st.daysLeft > 0 && linked.dailyTarget != st.perDay) {
-                        FilledTonalButton(onClick = { Repo.matchDailyToDeadline(g.id)?.let(Repo::toast) }, modifier = Modifier.height(32.dp)) {
+                        FilledTonalButton(onClick = { Repo.matchDailyToDeadline(g.id) }, modifier = Modifier.height(32.dp)) {
                             Text("Günlük hedefi ${st.perDay} yap", fontSize = 12.sp)
                         }
                     }
@@ -216,4 +216,12 @@ private fun DeadlineDialog(data: AppData, onDismiss: () -> Unit) {
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("İptal") } },
     )
+}
+
+private fun paceLabel(p: Pace) = when (p) {
+    Pace.DONE -> "Tamamlandı"
+    Pace.AHEAD -> "Plandan önde"
+    Pace.ON_TRACK -> "Planda"
+    Pace.BEHIND -> "Plandan geride"
+    Pace.OVERDUE -> "Süresi geçti"
 }

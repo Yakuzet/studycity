@@ -18,6 +18,12 @@ object Time {
 
     fun startOfDay(d: LocalDate): Long = d.atStartOfDay(zone()).toInstant().toEpochMilli()
 
+    /** O günün saat:dakikası (yaz saati geçişinde de doğru): günün dakikasından an. */
+    fun at(d: LocalDate, minuteOfDay: Int): Long {
+        if (minuteOfDay >= 24 * 60) return startOfDay(d.plusDays(1))
+        return d.atTime(java.time.LocalTime.of(minuteOfDay / 60, minuteOfDay % 60)).atZone(zone()).toInstant().toEpochMilli()
+    }
+
     fun minuteOfDay(ms: Long): Int {
         val z = Instant.ofEpochMilli(ms).atZone(zone())
         return z.hour * 60 + z.minute

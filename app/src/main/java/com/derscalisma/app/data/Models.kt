@@ -41,11 +41,135 @@ data class Settings(
     val sfxVolume: Int = 80,
     /** Köy ve savaş 3D mi çizilsin (kapalıysa 2D). */
     val view3d: Boolean = true,
+
+    // ---- v1.5: dil
+    /** Arayüz dili (tr, en, de, fr, ru, ja, zh). Boşsa telefonun dili kullanılır. */
+    val language: String = "",
+
+    // ---- v1.5: otomatik geçişler
+    /** Çalışma turu bitince molaya kendiliğinden geç. */
+    val autoBreak: Boolean = true,
+    /** Molaya geçmeden önce beklenecek süre (sn). Bu arada "ek süre" seçilebilir. 0 = hemen. */
+    val autoBreakDelaySec: Int = 10,
+    /** Mola bitince çalışmaya kendiliğinden geç. */
+    val autoWork: Boolean = true,
+    /** Çalışmaya geçmeden önce beklenecek süre (sn). 0 = hemen. */
+    val autoWorkDelaySec: Int = 10,
+
+    // ---- v1.5: dikkat sorusu
+    /** "Odaklı mısın?" sorusunun cevap süresi (sn). Süre dolunca odaklı sayılır ve az sonra tekrar sorulur. */
+    val focusAnswerSec: Int = 10,
+
+    // ---- v1.5: ses
+    /** Çalışma müziği (StudyTrack.id). "off" = kapalı. */
+    val studyMusic: String = "off",
+    /** Çalışma müziği molada da çalsın. */
+    val studyMusicInBreak: Boolean = false,
+    /** Uygulama açıkken faz değişiminde ses ve titreşim. */
+    val phaseSounds: Boolean = true,
 )
 
-/** Cevap bekleyen "dikkatin toplu mu?" sorusu. */
+/**
+ * Cevap bekleyen "odaklı mısın?" sorusu ve cevapsız kalırsa tekrar sorma zinciri.
+ *
+ * Zincir: 1. soru cevapsız kalırsa odaklı sayılır; [Focus.REASK_MS] sonra 2. soru gelir. 2. soru da
+ * cevapsız kalırsa dağınık sayılır ve uyarı verilir; birkaç kez daha sorulur. Son soru da cevapsız
+ * kalırsa çalışma süresi [firstAt] anına geri alınır ve zamanlayıcı duraklatılır ([AwayState]).
+ */
 @Serializable
-data class FocusAsk(val askedAt: Long)
+data class FocusAsk(
+    val askedAt: Long,
+    /** Cevap süresinin dolduğu an. 0 = süresiz (eski kayıtlar). */
+    val expiresAt: Long = 0,
+    /** 1 = ilk soru; 2 ve sonrası "orada mısın?" tekrarları. */
+    val attempt: Int = 1,
+    /** Zincirin ilk sorusunun anı: hiç cevap gelmezse çalışma süresi buraya geri alınır. */
+    val firstAt: Long = askedAt,
+    /** false: tekrar sorusu bekleniyor, [askedAt] anında gösterilecek. */
+    val visible: Boolean = true,
+    /** Tur sonunda sorulan soru: cevapsız kalırsa tekrar sorulmaz. */
+    val endOfRound: Boolean = false,
+)
+
+/** Dikkat sorularına üst üste cevap gelmedi: süre ilk sorunun anına geri alındı, zamanlayıcı duraklatıldı. */
+@Serializable
+data class AwayState(
+    /** İlk cevapsız sorunun anı (çalışma süresi buraya geri alındı). */
+    val since: Long,
+    /** Durumun fark edildiği an. */
+    val detectedAt: Long,
+    /** Sayılmayan (geri alınan) çalışma süresi. */
+    val lostMs: Long,
+)
+
+/** Acil durum / ara verme sebepleri. Zaman çizelgesinde ve geçmişte gösterilir. */
+@Serializable
+enum class PauseReason { VISITOR, COOKING, CHORES, PHONE, TOILET, FAMILY, HEALTH, OTHER }
+
+/** Zaman çizelgesi bölüm türü. */
+@Serializable
+enum class SegKind { WORK, BREAK, PAUSE, AWAY }
+
+/** Oturum zaman çizelgesinin bir parçası. */
+@Serializable
+data class Segment(
+    val start: Long,
+    val end: Long,
+    val kind: SegKind,
+    /** Çalışma bölümünde dikkat: 1 odaklı, 0 dağınık, -1 bilinmiyor (soru sorulmadı). */
+    val focus: Int = -1,
+    /** Ek süre (normal turun dışında, daha çok ödül veren) çalışma. */
+    val overtime: Boolean = false,
+    val reason: PauseReason? = null,
+)
+
+/** Bitmiş bir oturumun kaydı: geçmiş ve zaman çizelgesi için. */
+@Serializable
+data class SessionLog(
+    /** Oturum kimliği = başlangıç anı. */
+    val id: Long,
+    val start: Long,
+    val end: Long,
+    val workMs: Long,
+    val segments: List<Segment> = emptyList(),
+    val focusYes: Int = 0,
+    val focusNo: Int = 0,
+    val completed: Boolean = false,
+    /** Zamanlayıcı açılmadan elle eklenen çalışma. */
+    val manual: Boolean = false,
+    val overtimeMs: Long = 0,
+    val coins: Int = 0,
+) {
+    /** Bütün sorulara "odaklıyım" denmiş, hiç dağılma ya da yokluk yok: zaman çizelgesinde parlar. */
+    val perfect: Boolean
+        get() = !manual && focusYes > 0 && focusNo == 0 && segments.none { it.kind == SegKind.AWAY }
+}
+
+/** Ders parası kazancı / harcaması türü. Metinler dil dosyalarında. */
+@Serializable
+enum class EarnKind {
+    STUDY, OVERTIME, SESSION_COMPLETE, FOCUS_ANSWER, EARLY_RETURN, DAILY_GOAL, MILESTONE, GOAL,
+    WINDOW_ATTEND, WINDOW_GOAL, DEADLINE, MANUAL, LIBRARY, GAME, BREAK_EXTENSION, AWAY_PENALTY, PURCHASE, OTHER,
+}
+
+/** Cüzdan hareketi. Oturum sırasında kazanılanlar oturum özetinde tek tek gösterilir. */
+@Serializable
+data class Earning(
+    val at: Long,
+    /** Pozitif kazanç, negatif harcama. */
+    val amount: Int,
+    val kind: EarnKind,
+    /** Türüne göre: dakika, seri günü, tur sayısı, gün... */
+    val n: Int = 0,
+    /** Kullanıcının verdiği ad (hedef, ders saati, süreli hedef, ürün) ya da serbest metin. */
+    val label: String = "",
+    /** Bir oturum sırasında kazanıldıysa oturumun kimliği (= başlangıç anı), değilse 0. */
+    val session: Long = 0,
+)
+
+/** Günlük hedef tamamlandığında gösterilen seri kutlaması (uygulama kapalıyken olduysa açılınca gösterilir). */
+@Serializable
+data class Celebration(val streak: Int, val day: String, val newBest: Boolean = false)
 
 @Serializable
 enum class GoalType(val emoji: String, val defaultName: String, val defaultUnit: String, val defaultTarget: Int, val step: Int) {
@@ -73,6 +197,8 @@ data class StudyWindow(
     val endMin: Int,
     val days: Set<Int> = (1..7).toSet(),
     val targetMinutes: Int = 60,
+    /** Eklendiği gün (yyyy-MM-dd). Seri hesabında bundan önceki günler sayılmaz. Eski kayıtlarda boş. */
+    val createdDay: String = "",
 )
 
 @Serializable
@@ -117,9 +243,41 @@ data class TimerState(
     val sessionFocusNo: Int = 0,
     /** Bu faza elle eklenen / çıkarılan süre (+5 dk gibi). Faz değişince sıfırlanır. */
     val phaseExtraMs: Long = 0,
+
+    // ---- v1.5
+    /**
+     * Faz bitti, sıradakine geçiş bekleniyor. [phase] biten fazdır; [phaseEndAt] bittiği an.
+     * Otomatik geçiş kapalıysa kullanıcı başlatana kadar, açıksa [autoAt] anına kadar beklenir.
+     */
+    val waiting: Boolean = false,
+    /** Bekleme otomatikse sıradaki fazın başlayacağı an. */
+    val autoAt: Long? = null,
+    /** Kronometre: çalışma süresi bitti ama kullanıcı ek süreyle devam ediyor, sayaç yukarı sayar. */
+    val stopwatch: Boolean = false,
+    /** Şu anki çalışma bölümü ek süre (normal dakikadan fazla ödül verir). */
+    val overtime: Boolean = false,
+    /** Bu oturumda ek sürede çalışılan toplam süre. */
+    val overtimeMs: Long = 0,
+    /** Bu oturumda satın alınan mola uzatmaları. */
+    val breakExtensions: Int = 0,
+    /** Sıradaki mola uzatılamaz (yanıtsız kalma cezası). */
+    val extensionBlocked: Boolean = false,
+    /** Mola yarısı dolmadan atlandı: sıradaki çalışma turunun dakika ödülü düşük. */
+    val fatigue: Boolean = false,
+    /** Duraklatmanın sebebi (acil durum). */
+    val pauseReason: PauseReason? = null,
+    /** Zaman çizelgesi: bu oturumun kapanmış bölümleri. */
+    val segments: List<Segment> = emptyList(),
+    /** Açık bölümün başlangıcı. 0 ise [phaseStartedAt] kullanılır (eski kayıtlar). */
+    val segStart: Long = 0,
 ) {
     val isPaused: Boolean get() = pausedRemainingMs != null
     val phaseTotalMs: Long get() = ((if (phase == Phase.WORK) workMinutes else breakMinutes) * MINUTE_MS + phaseExtraMs).coerceAtLeast(MINUTE_MS / 6)
+    /** Oturum kimliği (kazançlar ve geçmiş bununla eşleşir). */
+    val id: Long get() = startedAt
+    val isLastRound: Boolean get() = round >= rounds
+    /** Zaman akıyor mu (duraklatılmamış ve faz geçişi beklenmiyor). */
+    val isRunning: Boolean get() = !isPaused && !waiting
 }
 
 @Serializable
@@ -128,8 +286,27 @@ data class PlacedBuilding(val x: Int, val y: Int, val buildingId: String)
 @Serializable
 data class LogEvent(val at: Long, val text: String, val coins: Int = 0)
 
+/**
+ * Bitmiş ve özeti henüz kapatılmamış oturum. Özet ekranı bunu gösterir; oturumda kazanılan paralar
+ * ([Earning.session] == [id]) özet kapatılana kadar bakiyede "bekleyen" olarak gösterilir.
+ */
 @Serializable
-data class SessionSummary(val workMs: Long, val endedAt: Long, val focusYes: Int = 0, val focusNo: Int = 0)
+data class SessionSummary(
+    val workMs: Long,
+    val endedAt: Long,
+    val focusYes: Int = 0,
+    val focusNo: Int = 0,
+    // ---- v1.5
+    /** Oturum kimliği (= başlangıç anı). Eski kayıtlarda 0. */
+    val id: Long = 0,
+    val startedAt: Long = 0,
+    /** Bütün turlar bitirildi. */
+    val completed: Boolean = false,
+    val rounds: Int = 0,
+    val overtimeMs: Long = 0,
+    /** Sayfa / soru ilerlemesi girildi ya da geçildi. */
+    val logged: Boolean = false,
+)
 
 @Serializable
 data class AppData(
@@ -157,8 +334,37 @@ data class AppData(
     val bestDailyStreak: Int = 0,
     val lastProcessedDay: String? = null,
     val firedReminders: Set<String> = emptySet(),
+    /** Eski metin günlüğü (köy olayları burada kalır). Ders parası hareketleri [ledger]'da. */
     val log: List<LogEvent> = emptyList(),
+
+    // ---- v1.5
+    /** Ders parası hareketleri (en yenisi başta, sınırlı sayıda). */
+    val ledger: List<Earning> = emptyList(),
+    /** Bitmiş oturumlar (en yenisi başta): geçmiş ve zaman çizelgesi. */
+    val sessionLogs: List<SessionLog> = emptyList(),
+    /** Gösterilmeyi bekleyen seri kutlaması. */
+    val celebration: Celebration? = null,
+    /** Dikkat sorularına cevap gelmediği için duraklatılmış oturum (kullanıcıya sorulacak). */
+    val away: AwayState? = null,
+    /** İlk açılış tanıtımı yapıldı. Yeni kurulumda false olarak başlar. */
+    val onboarded: Boolean = true,
+    /** Kayıt biçimi sürümü (yükseltmede bir kez yapılacak dönüşümler için). */
+    val schema: Int = 0,
 )
+
+/** Oturum sürerken / özeti kapanmadan kazanılan, bakiyede henüz gösterilmeyen paralar. */
+fun AppData.heldCoins(): Int {
+    val running = timer?.id ?: 0L
+    val summary = lastSession?.id ?: 0L
+    if (running == 0L && summary == 0L) return 0
+    return ledger.asSequence()
+        .filter { it.session != 0L && (it.session == running || it.session == summary) }
+        .sumOf { it.amount }
+        .coerceAtLeast(0)
+}
+
+/** Ekranda gösterilen bakiye: bekleyen oturum kazançları özet kapanınca eklenir. */
+fun AppData.visibleCoins(): Int = (coins - heldCoins()).coerceAtLeast(0)
 
 fun defaultGoals() = listOf(
     Goal("g_pages", GoalType.PAGES, "Sayfa", 30, "sayfa"),

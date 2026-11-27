@@ -4,13 +4,7 @@ import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import kotlin.math.ceil
 
-enum class Pace(val emoji: String, val title: String) {
-    DONE("✅", "Tamamlandı"),
-    AHEAD("🟢", "Plandan önde"),
-    ON_TRACK("🟡", "Planda"),
-    BEHIND("🔴", "Plandan geride"),
-    OVERDUE("⏰", "Süresi geçti"),
-}
+enum class Pace { DONE, AHEAD, ON_TRACK, BEHIND, OVERDUE }
 
 data class DeadlineStatus(
     val goal: DeadlineGoal,
@@ -28,6 +22,8 @@ data class DeadlineStatus(
     /** Şu anki ortalama hızla tahmini bitiş günü. */
     val projected: LocalDate?,
     val pace: Pace,
+    /** Bugün planda kalmak için bugün yapılması gereken toplam (bugün yapılan dahil). */
+    val todayQuota: Int = perDay,
 ) {
     val ratio get() = (done.toFloat() / goal.total).coerceIn(0f, 1f)
     val expectedRatio get() = (expected.toFloat() / goal.total).coerceIn(0f, 1f)
@@ -68,7 +64,8 @@ object Deadlines {
             done >= expected -> Pace.ON_TRACK
             else -> Pace.BEHIND
         }
-        return DeadlineStatus(g, done, remaining, totalDays, daysLeft, perDay, expected, todayDone, projected, pace)
+        val quota = if (daysLeft > 0) ceil((remaining + todayDone) / daysLeft.toDouble()).toInt() else remaining
+        return DeadlineStatus(g, done, remaining, totalDays, daysLeft, quota, expected, todayDone, projected, pace, quota)
     }
 
     /** Zamanında bitirme ödülü: büyüklüğe ve erken bitirmeye göre. */

@@ -35,6 +35,7 @@ fun TimerScreen(data: AppData, now: Long) {
         Pane(1.2f) { TimerPanel(data, now) { confirmStop = true } },
         Pane(1f) {
             SessionSettingsPanel(data, now)
+            AutoPanel(data)
             FocusSettingsPanel(data, now)
             TodayPanel(data, now)
         },
@@ -55,76 +56,185 @@ fun TimerScreen(data: AppData, now: Long) {
 private fun TimerPanel(data: AppData, now: Long, onStop: () -> Unit) {
     val t = data.timer
     val s = data.settings
-    val cs = MaterialTheme.colorScheme
+    val c = com.derscalisma.app.ui.theme.AppTheme.colors
+    val f = com.derscalisma.app.i18n.S.focus
     val layout = LocalLayout.current
+    var earlyBreak by remember { mutableStateOf(false) }
+    var emergency by remember { mutableStateOf(false) }
 
     Panel(Modifier.fillMaxWidth()) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
-            val ringSize = if (layout.compact) minOf(maxWidth * 0.8f, 300.dp)
-            else minOf(maxWidth * 0.85f, layout.height - 150.dp).coerceIn(140.dp, 380.dp)
+            val ringSize = if (layout.compact) minOf(maxWidth * 0.78f, 290.dp)
+            else minOf(maxWidth * 0.85f, layout.height - 190.dp).coerceIn(130.dp, 360.dp)
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 val isBreak = t?.phase == Phase.BREAK
                 val total = t?.phaseTotalMs ?: (s.workMinutes * MINUTE_MS)
                 val remaining = when {
                     t == null -> total
+                    t.waiting -> 0L
                     t.pausedRemainingMs != null -> t.pausedRemainingMs
                     else -> (t.phaseEndAt - now).coerceAtLeast(0)
                 }
-                val color = if (isBreak) cs.secondary else cs.primary
-
+                val color = when {
+                    t?.overtime == true -> c.warning
+                    isBreak -> c.success
+                    else -> c.accent
+                }
                 Text(
                     when {
-                        t == null -> "Hazır"
-                        t.isPaused -> "⏸ Duraklatıldı"
-                        isBreak -> "☕ MOLA"
-                        else -> "📖 ÇALIŞMA"
+                        t == null -> f.ready
+                        t.isPaused -> f.paused
+                        t.overtime -> f.overtimeBadge
+                        isBreak -> f.onBreak
+                        else -> f.studying
                     },
                     style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
                     color = color,
                 )
+                if (t?.fatigue == true && t.phase == Phase.WORK) Text(f.fatigueBadge, style = MaterialTheme.typography.bodySmall, color = c.warning)
                 Spacer(Modifier.height(6.dp))
-                ProgressRing(
-                    progress = if (total > 0) 1f - remaining.toFloat() / total else 0f,
+                com.derscalisma.app.ui.kit.Ring(
+                    progress = if (t?.stopwatch == true) 1f else if (total > 0) 1f - remaining.toFloat() / total else 0f,
                     modifier = Modifier.size(ringSize),
                     color = color,
-                    style = Catalog.timerStyle(data.timerStyle),
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(Time.clock(remaining), fontSize = (ringSize.value / 5.2f).sp, fontWeight = FontWeight.Black)
+                        val label = if (t?.stopwatch == true) "+" + Time.clock(Repo.stopwatchElapsed(t, now)) else Time.clock(remaining)
+                        Text(label, style = MaterialTheme.typography.displayLarge.copy(fontSize = (ringSize.value / 4.6f).sp))
                         val round = t?.round ?: 1
                         val rounds = t?.rounds ?: s.rounds
-                        Text("Tur $round / $rounds", style = MaterialTheme.typography.bodyMedium)
+                        Text(com.derscalisma.app.i18n.S.common.roundOf(round, rounds), style = MaterialTheme.typography.bodyMedium, color = c.textSecondary)
                         Spacer(Modifier.height(4.dp))
                         RoundDots(round, rounds, done = t?.let { if (it.phase == Phase.BREAK) it.round else it.round - 1 } ?: 0)
+                        if (t != null) {
+                            val held = data.ledger.filter { it.session == t.id }.sumOf { it.amount }
+                            if (held > 0) Text(f.sessionEarned(held), style = MaterialTheme.typography.labelMedium, color = c.success)
+                        }
                     }
                 }
                 Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    val pad = PaddingValues(horizontal = 6.dp)
-                    if (t == null) {
-                        Button(onClick = { Repo.startTimer() }, modifier = Modifier.weight(1f)) { Text("▶  Başlat") }
-                    } else {
-                        if (t.isPaused) {
-                            Button(onClick = { Repo.resumeTimer() }, modifier = Modifier.weight(1f), contentPadding = pad) {
-                                Text("▶ Devam", maxLines = 1)
+                when {
+                    t == null -> com.derscalisma.app.ui.kit.PrimaryButton(f.startCta(s.workMinutes, s.rounds), { Repo.startTimer() }, Modifier.fillMaxWidth())
+                    t.waiting -> WaitingCard(t, now)
+                    else -> {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            val pad = PaddingValues(horizontal = 6.dp)
+                            if (t.stopwatch) {
+                                Button(onClick = { Repo.finishStopwatch() }, modifier = Modifier.weight(1f), contentPadding = pad) { Text(f.finishOvertime, maxLines = 1) }
+                            } else if (t.isPaused) {
+                                Button(onClick = { Repo.resumeTimer() }, modifier = Modifier.weight(1f), contentPadding = pad) { Text(f.resume, maxLines = 1) }
+                            } else {
+                                Button(onClick = { Repo.pauseTimer() }, modifier = Modifier.weight(1f), contentPadding = pad) { Text(f.pause, maxLines = 1) }
                             }
-                        } else {
-                            Button(onClick = { Repo.pauseTimer() }, modifier = Modifier.weight(1f), contentPadding = pad) {
-                                Text("⏸ Duraklat", maxLines = 1)
-                            }
+                            if (!t.stopwatch) OutlinedButton(onClick = {
+                                if (Repo.breakSkipIsEarly(t, System.currentTimeMillis())) earlyBreak = true else Repo.skipPhase()
+                            }, modifier = Modifier.weight(1f), contentPadding = pad) { Text(if (isBreak) f.endBreak else f.skipRound, maxLines = 1) }
+                            OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f), contentPadding = pad) { Text(f.stop, maxLines = 1) }
                         }
-                        OutlinedButton(onClick = { Repo.skipPhase() }, modifier = Modifier.weight(1f), contentPadding = pad) {
-                            Text("⏭ Atla", maxLines = 1)
+                        Spacer(Modifier.height(6.dp))
+                        if (isBreak) {
+                            val left = Rewards.MAX_BREAK_EXTENSIONS - t.breakExtensions
+                            if (t.extensionBlocked) Text(f.extendBlocked, style = MaterialTheme.typography.bodySmall, color = c.danger)
+                            else if (left > 0) com.derscalisma.app.ui.kit.TonalButton(
+                                f.extendBreak(Rewards.BREAK_EXTENSION_MIN, Rewards.breakExtensionPrice(t.breakExtensions)),
+                                { Repo.extendBreak()?.let(Repo::toast) },
+                                icon = com.derscalisma.app.ui.icons.AppIcons.LocalCafe,
+                            )
+                        } else if (!t.isPaused) {
+                            com.derscalisma.app.ui.kit.GhostButton(f.emergency, { emergency = true }, icon = com.derscalisma.app.ui.icons.AppIcons.Emergency, color = c.danger)
                         }
-                        OutlinedButton(onClick = onStop, modifier = Modifier.weight(1f), contentPadding = pad) {
-                            Text("⏹ Bitir", maxLines = 1)
+                        if (t.isPaused && data.away == null) {
+                            Text(f.pauseReasonPrompt, style = MaterialTheme.typography.labelMedium, color = c.textSecondary)
+                            Spacer(Modifier.height(4.dp))
+                            com.derscalisma.app.ui.rewards.ReasonGrid(t.pauseReason) { Repo.setPauseReason(if (it == t.pauseReason) null else it) }
                         }
                     }
                 }
             }
         }
     }
+    if (earlyBreak) {
+        com.derscalisma.app.ui.kit.AppDialog(
+            title = f.earlyBreakTitle, text = f.earlyBreakText, icon = com.derscalisma.app.ui.icons.AppIcons.FreeBreakfast,
+            onDismiss = { earlyBreak = false }, dismissText = f.keepResting, confirmText = f.skipAnyway,
+            onConfirm = { Repo.skipPhase(); earlyBreak = false },
+        )
+    }
+    if (emergency) {
+        com.derscalisma.app.ui.kit.AppDialog(title = f.emergencyTitle, text = f.emergencyText, icon = com.derscalisma.app.ui.icons.AppIcons.Emergency, onDismiss = { emergency = false }) {
+            com.derscalisma.app.ui.rewards.ReasonGrid { Repo.pauseTimer(it); emergency = false }
+        }
+    }
+}
+
+/** Faz bitti: ek süre, kronometre ya da sıradaki faz. */
+@Composable
+private fun WaitingCard(t: TimerState, now: Long) {
+    val f = com.derscalisma.app.i18n.S.focus
+    val c = com.derscalisma.app.ui.theme.AppTheme.colors
+    val afterWork = t.phase == Phase.WORK
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(if (!afterWork) f.breakOver else if (t.isLastRound) f.lastRoundDone else f.roundDone, style = MaterialTheme.typography.titleLarge)
+        t.autoAt?.let { at ->
+            val sec = ((at - now + 999) / 1000).toInt().coerceAtLeast(0)
+            Text(
+                if (!afterWork) f.autoWorkIn(sec) else if (t.isLastRound) f.autoFinishIn(sec) else f.autoBreakIn(sec),
+                style = MaterialTheme.typography.bodyMedium, color = c.textSecondary,
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        com.derscalisma.app.ui.kit.PrimaryButton(
+            if (!afterWork) f.startWork else if (t.isLastRound) f.finishSession else f.startBreak,
+            { Repo.startNext() }, Modifier.fillMaxWidth(),
+        )
+        if (afterWork) {
+            Spacer(Modifier.height(8.dp))
+            Text(f.needMoreTime, style = MaterialTheme.typography.titleSmall)
+            Text(f.overtimeHint, style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+            Spacer(Modifier.height(6.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(2, 5, 10).forEach { m -> FilledTonalButton(onClick = { Repo.addOvertime(m) }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text("+$m") } }
+                FilledTonalButton(onClick = { Repo.startStopwatch() }, contentPadding = PaddingValues(horizontal = 10.dp)) { Text(f.stopwatch) }
+            }
+        } else if (!t.extensionBlocked && t.breakExtensions < Rewards.MAX_BREAK_EXTENSIONS) {
+            Spacer(Modifier.height(6.dp))
+            com.derscalisma.app.ui.kit.TonalButton(
+                f.extendBreak(Rewards.BREAK_EXTENSION_MIN, Rewards.breakExtensionPrice(t.breakExtensions)),
+                { Repo.extendBreak()?.let(Repo::toast) },
+            )
+        }
+    }
+}
+
+/** Otomatik geçişler, müzik ve elle süre ekleme. */
+@Composable
+private fun AutoPanel(data: AppData) {
+    val s = data.settings
+    val f = com.derscalisma.app.i18n.S.focus
+    var manual by remember { mutableStateOf(false) }
+    val delays = listOf(0, 5, 10, 15, 30, 60)
+    fun delayLabel(d: Int) = if (d == 0) f.immediately else com.derscalisma.app.i18n.S.common.seconds(d)
+    Panel(Modifier.fillMaxWidth(), title = f.sessionSettings) {
+        LabeledControl(f.autoBreak, hint = f.autoBreakHint) {
+            Switch(checked = s.autoBreak, onCheckedChange = { v -> Repo.updateSettings { it.copy(autoBreak = v) } })
+        }
+        if (s.autoBreak) com.derscalisma.app.ui.kit.ChoiceChips(delays, s.autoBreakDelaySec, { delayLabel(it) }, { d -> Repo.updateSettings { it.copy(autoBreakDelaySec = d) } })
+        LabeledControl(f.autoWork, hint = f.autoWorkHint) {
+            Switch(checked = s.autoWork, onCheckedChange = { v -> Repo.updateSettings { it.copy(autoWork = v) } })
+        }
+        if (s.autoWork) com.derscalisma.app.ui.kit.ChoiceChips(delays, s.autoWorkDelaySec, { delayLabel(it) }, { d -> Repo.updateSettings { it.copy(autoWorkDelaySec = d) } })
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        Text(f.music, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(4.dp))
+        val tracks = listOf("off") + com.derscalisma.app.audio.StudyTrack.entries.map { it.id }
+        com.derscalisma.app.ui.kit.ChoiceChips(tracks, s.studyMusic, { if (it == "off") f.musicOff else f.track(it) }, { id -> Repo.updateSettings { it.copy(studyMusic = id) } })
+        if (s.studyMusic != "off") LabeledControl(f.musicInBreak) {
+            Switch(checked = s.studyMusicInBreak, onCheckedChange = { v -> Repo.updateSettings { it.copy(studyMusicInBreak = v) } })
+        }
+        HorizontalDivider(Modifier.padding(vertical = 8.dp))
+        com.derscalisma.app.ui.kit.TonalButton(f.manualTitle, { manual = true }, icon = com.derscalisma.app.ui.icons.AppIcons.MoreTime)
+    }
+    if (manual) com.derscalisma.app.ui.rewards.ManualStudyDialog { manual = false }
 }
 
 @Composable
@@ -268,6 +378,9 @@ private fun FocusSettingsPanel(data: AppData, now: Long) {
             }
         }
         Text(example, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+        LabeledControl(com.derscalisma.app.i18n.S.focus.answerTime, hint = com.derscalisma.app.i18n.S.focus.answerTimeHint) {
+            Stepper(s.focusAnswerSec, { v -> Repo.updateSettings { it.copy(focusAnswerSec = v) } }, min = Focus.MIN_ANSWER_SEC, max = Focus.MAX_ANSWER_SEC, step = 5, suffix = " sn")
+        }
         HorizontalDivider(Modifier.padding(vertical = 6.dp))
         val t = data.timer
         if (t != null) FocusSummary("Bu oturum", t.sessionFocusYes, t.sessionFocusNo)
