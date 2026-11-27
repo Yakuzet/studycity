@@ -95,6 +95,7 @@ fun HomeScreen(data: AppData, now: Long, onStart: () -> Unit) {
                 }
                 data.goals.forEach { g -> GoalProgressRow(g, rec.progress[g.id] ?: 0, g.id in rec.goalsMet) }
             }
+            DeadlinesPanel(data, now, compact = true)
             Panel(Modifier.fillMaxWidth(), title = "Çalışma Aralığı") {
                 Text(windowStatusText(data, now), style = MaterialTheme.typography.bodyMedium)
             }

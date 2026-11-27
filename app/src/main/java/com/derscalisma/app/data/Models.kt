@@ -33,6 +33,14 @@ data class Settings(
     /** Çalışma turu içinde ek soru: 0 kapalı, 1 tur sonunda, 2 yarısında, 3 her 1/3'te, 4 her 1/4'te. */
     val focusCheckDivisions: Int = 2,
     val focusVibrate: Boolean = true,
+
+    // ---- Ses ve görünüm
+    val musicEnabled: Boolean = true,
+    val sfxEnabled: Boolean = true,
+    val musicVolume: Int = 50,
+    val sfxVolume: Int = 80,
+    /** Köy ve savaş 3D mi çizilsin (kapalıysa 2D). */
+    val view3d: Boolean = true,
 )
 
 /** Cevap bekleyen "dikkatin toplu mu?" sorusu. */
@@ -137,6 +145,8 @@ data class AppData(
     /** v1.0 emoji şehri; yalnızca eski kayıtları okuyup iade etmek için duruyor. */
     val city: List<PlacedBuilding> = emptyList(),
     val game: GameState = GameState(),
+    /** Belirli bir tarihe kadar bitirilecek hedefler (ör. 20 Aralık'a kadar 400 sayfa). */
+    val deadlines: List<DeadlineGoal> = emptyList(),
     val owned: Set<String> = setOf(DEFAULT_THEME, DEFAULT_GROUND, DEFAULT_TIMER_STYLE, DEFAULT_BG),
     val theme: String = DEFAULT_THEME,
     val background: String = DEFAULT_BG,
@@ -153,4 +163,20 @@ data class AppData(
 fun defaultGoals() = listOf(
     Goal("g_pages", GoalType.PAGES, "Sayfa", 30, "sayfa"),
     Goal("g_questions", GoalType.QUESTIONS, "Soru / Test", 60, "soru"),
+)
+
+/** Belirli bir güne kadar tamamlanacak hedef. Bir günlük hedefe bağlıysa o hedefe girilen ilerleme otomatik sayılır. */
+@Serializable
+data class DeadlineGoal(
+    val id: String,
+    val title: String,
+    val unit: String,
+    val total: Int,
+    /** yyyy-MM-dd */
+    val startDate: String,
+    val dueDate: String,
+    val linkedGoalId: String? = null,
+    /** Elle eklenen ilerleme (bağlı hedeften gelenler hariç). */
+    val manual: Int = 0,
+    val completedAt: Long? = null,
 )

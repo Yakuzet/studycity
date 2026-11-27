@@ -47,6 +47,11 @@ fun CityScreen(
     var tab by rememberSaveable { mutableStateOf(initialTab) }
     val g = data.game
 
+    DisposableEffect(Unit) {
+        com.derscalisma.app.audio.Sound.music(com.derscalisma.app.audio.Music.VILLAGE)
+        onDispose { com.derscalisma.app.audio.Sound.music(null) }
+    }
+
     // Eğitim kuyruğunu canlı tut.
     LaunchedEffect(g.queue.isNotEmpty() || g.spellQueue.isNotEmpty(), now / 1000) {
         val head = g.queue.firstOrNull()
@@ -78,6 +83,7 @@ fun CityScreen(
                 maxLines = 1,
             )
         }
+        if (tab == CityTab.VILLAGE) SurpriseBar(data, onStudy)
         when (tab) {
             CityTab.VILLAGE -> VillageTab(data, now, onStudy)
             CityTab.ARMY -> ArmyTab(data, now)
@@ -116,7 +122,8 @@ private fun VillageTab(data: AppData, now: Long, onStudy: () -> Unit) {
 
     val map: @Composable (Modifier) -> Unit = { mod ->
         Box(mod.clip(RoundedCornerShape(16.dp))) {
-            VillageView(g, now, selectedId, ghost, onTap, Modifier.fillMaxSize())
+            if (data.settings.view3d) com.derscalisma.app.ui.game3d.Village3D(data, now, selectedId, ghost, onTap, Modifier.fillMaxSize())
+            else VillageView(g, now, selectedId, ghost, onTap, Modifier.fillMaxSize())
             Row(
                 Modifier.align(Alignment.TopEnd).padding(8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),

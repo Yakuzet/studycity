@@ -14,8 +14,12 @@ android {
         applicationId = "com.derscalisma.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
+        ndk {
+            // 3D motor (Filament) yerel kütüphaneleri: telefonlar + emülatör
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
     }
 
     buildTypes {
@@ -55,4 +59,6 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // 3D: Google Filament tabanlı SceneView (Kotlin 2.0 / Compose 1.7 ile uyumlu sürüm)
+    implementation("io.github.sceneview:sceneview:2.3.0")
 }

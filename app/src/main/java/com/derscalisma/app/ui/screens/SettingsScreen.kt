@@ -78,6 +78,30 @@ fun SettingsScreen(data: AppData) {
             }
         },
         Pane(1f) {
+            Panel(Modifier.fillMaxWidth(), title = "🔊 Ses ve Görünüm") {
+                LabeledControl("Müzik", hint = "Köy ve savaş müzikleri bu uygulama için bestelendi") {
+                    Switch(checked = s.musicEnabled, onCheckedChange = { v -> Repo.updateSettings { it.copy(musicEnabled = v) } })
+                }
+                if (s.musicEnabled) {
+                    Slider(
+                        value = s.musicVolume / 100f,
+                        onValueChange = { v -> Repo.updateSettings { it.copy(musicVolume = (v * 100).toInt()) } },
+                    )
+                }
+                LabeledControl("Ses efektleri") {
+                    Switch(checked = s.sfxEnabled, onCheckedChange = { v -> Repo.updateSettings { it.copy(sfxEnabled = v) } })
+                }
+                if (s.sfxEnabled) {
+                    Slider(
+                        value = s.sfxVolume / 100f,
+                        onValueChange = { v -> Repo.updateSettings { it.copy(sfxVolume = (v * 100).toInt()) } },
+                        onValueChangeFinished = { com.derscalisma.app.audio.Sound.play(com.derscalisma.app.audio.Sfx.COIN) },
+                    )
+                }
+                LabeledControl("3D köy ve savaş", hint = "Kapalıysa 2D çizilir (eski telefonlar için)") {
+                    Switch(checked = s.view3d, onCheckedChange = { v -> Repo.updateSettings { it.copy(view3d = v) } })
+                }
+            }
             Panel(Modifier.fillMaxWidth(), title = "⚙️ Genel") {
                 LabeledControl("Çalışırken ekranı açık tut") {
                     Switch(checked = s.keepScreenOn, onCheckedChange = { v -> Repo.updateSettings { it.copy(keepScreenOn = v) } })

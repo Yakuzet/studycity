@@ -26,6 +26,11 @@ fun SessionLogDialog(data: AppData, summary: SessionSummary) {
                 if (summary.focusYes + summary.focusNo > 0) {
                     FocusSummary("Oturum dikkati", summary.focusYes, summary.focusNo)
                 }
+                data.deadlines.filter { it.linkedGoalId == null && it.completedAt == null }.forEach { dl ->
+                    LabeledControl("📅 ${dl.title}", stackBelow = 380.dp) {
+                        Stepper(values["dl:${dl.id}"] ?: 0, { values["dl:${dl.id}"] = it }, min = 0, max = 2000, step = 1, bigStep = 5)
+                    }
+                }
                 data.goals.forEach { g ->
                     LabeledControl("${g.type.emoji} ${g.name}", stackBelow = 380.dp) {
                         Stepper(

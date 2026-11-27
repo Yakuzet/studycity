@@ -2,12 +2,14 @@ package com.derscalisma.app.notify
 
 import com.derscalisma.app.data.AppData
 import com.derscalisma.app.data.DayRecord
+import com.derscalisma.app.data.Deadlines
+import com.derscalisma.app.data.Pace
 import com.derscalisma.app.data.MINUTE_MS
 import com.derscalisma.app.data.Streaks
 import com.derscalisma.app.data.Time
 import java.time.LocalDate
 
-enum class ReminderKind { WINDOW_START, WINDOW_NUDGE, WINDOW_ENDING, STREAK_WARN, LAST_CHANCE }
+enum class ReminderKind { WINDOW_START, WINDOW_NUDGE, WINDOW_ENDING, STREAK_WARN, LAST_CHANCE, DEADLINE }
 
 data class Reminder(val key: String, val at: Long, val kind: ReminderKind, val windowId: String? = null)
 
@@ -30,6 +32,9 @@ object Reminders {
             }
         }
         val warnMin = s.warnHour * 60 + s.warnMinute
+        if (data.deadlines.any { it.completedAt == null && it.dueDate >= date.toString() }) {
+            list += Reminder("$date|deadline", day0 + (warnMin - 60).coerceAtLeast(12 * 60) * MINUTE_MS, ReminderKind.DEADLINE)
+        }
         list += Reminder("$date|warn", day0 + warnMin * MINUTE_MS, ReminderKind.STREAK_WARN)
         if (warnMin < LAST_CHANCE_MIN) {
             list += Reminder("$date|last", day0 + LAST_CHANCE_MIN * MINUTE_MS, ReminderKind.LAST_CHANCE)
@@ -86,6 +91,17 @@ object Reminders {
                 "⌛ ${win.label} bitmek üzere" to buildString {
                     append("Aralık hedefine $left dk kaldı, aralık 15 dk içinde bitiyor.")
                     if (st > 0) append(" $st aralıklık hedef serini kaybetme!")
+                }
+            }
+
+            ReminderKind.DEADLINE -> {
+                val behind = data.deadlines
+                    .filter { it.completedAt == null }
+                    .map { Deadlines.status(data, it, today) }
+                    .filter { it.pace == Pace.BEHIND && it.today < it.perDay }
+                if (behind.isEmpty()) return null
+                "📅 Süreli hedefinde geridesin" to behind.joinToString("\n") {
+                    "${it.goal.title}: bugün ${it.perDay - it.today} ${it.goal.unit} daha (${it.daysLeft} gün kaldı)"
                 }
             }
 

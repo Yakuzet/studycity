@@ -58,6 +58,7 @@ fun GoalsScreen(data: AppData, now: Long) {
             }
         },
         Pane(1.4f) {
+            DeadlinesPanel(data, now)
             Panel(
                 Modifier.fillMaxWidth(),
                 title = "Günlük Hedefler",

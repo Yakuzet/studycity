@@ -90,6 +90,9 @@ class BattleEngine(
 
     class Fx(val kind: FxKind, val x: Float, val y: Float, val born: Float, val life: Float, val size: Float, val vx: Float = 0f, val vy: Float = 0f)
 
+    /** Ekranın çalacağı ses olayları (her karede boşaltılır). */
+    enum class Snd { DEPLOY, SWORD, ARROW, CANNON, MAGIC, BOOM, WALL, SPELL, LIGHTNING, HEAL, DIE }
+
     class ActiveSpell(val kind: SType, val x: Float, val y: Float, val start: Float, val duration: Float, val radius: Float)
 
     // ------------------------------------------------------------------ durum
@@ -111,6 +114,7 @@ class BattleEngine(
     val projectiles = mutableListOf<Proj>()
     val effects = mutableListOf<Fx>()
     val activeSpells = mutableListOf<ActiveSpell>()
+    val sounds = ArrayList<Snd>()
     val remaining: MutableMap<TType, Int> = army.filterValues { it > 0 }.toMutableMap()
     val deployed = mutableMapOf<TType, Int>()
     val spellsLeft: MutableMap<SType, Int> = spells.filterValues { it > 0 }.toMutableMap()
@@ -180,6 +184,7 @@ class BattleEngine(
         remaining[t] = (remaining[t] ?: 0) - 1
         deployed[t] = (deployed[t] ?: 0) + 1
         effects += Fx(FxKind.DEPLOY, x, y, time, 0.5f, if (t == TType.HERO) 1.6f else 0.8f)
+        sounds += Snd.DEPLOY
         return true
     }
 
@@ -189,6 +194,7 @@ class BattleEngine(
         spellsLeft[k] = (spellsLeft[k] ?: 0) - 1
         spellsUsed[k] = (spellsUsed[k] ?: 0) + 1
         activeSpells += ActiveSpell(k, x, y, time, k.duration, k.radius)
+        sounds += if (k == SType.LIGHTNING) Snd.LIGHTNING else Snd.SPELL
         if (k == SType.LIGHTNING) {
             repeat(3) {
                 val a = rng.nextFloat() * 6.283f
@@ -241,6 +247,7 @@ class BattleEngine(
 
         val dead = troops.filter { !it.alive }
         dead.forEach { if (it.type != TType.BREAKER) effects += Fx(FxKind.DEATH, it.x, it.y, time, 0.6f, 0.7f) }
+        if (dead.isNotEmpty()) sounds += Snd.DIE
         troops.removeAll(dead)
         effects.removeAll { time - it.born > it.life && it.born <= time }
         activeSpells.removeAll { time - it.start > it.duration + 0.5f }
@@ -355,11 +362,13 @@ class BattleEngine(
         t.attackAnim = 0.25f
         val dmg = power(t)
         if (t.type.range < 1.5f) {
+            sounds += Snd.SWORD
             damageBuilding(tgt, dmg)
             val (hx, hy) = tgt.closest(t.x, t.y)
             effects += Fx(FxKind.HIT, hx, hy, time, 0.25f, if (t.type == TType.HERO) 0.8f else 0.5f)
         } else {
             val kind = if (t.type == TType.MAGE) PKind.MAGE_BOLT else PKind.BOLT
+            sounds += Snd.MAGIC
             projectiles += Proj(kind, t.x, t.y - 0.3f, t.x, t.y - 0.3f, tgt.cx, tgt.cy, null, dmg, t.type.splash, 9f, false)
         }
     }
@@ -373,6 +382,7 @@ class BattleEngine(
         t.attackAnim = 0.25f
         val dmg = power(t)
         if (t.type.range < 1.5f) {
+            sounds += Snd.SWORD
             damageWall(i, j, dmg)
             effects += Fx(FxKind.HIT, cx, j + 0.5f, time, 0.25f, 0.5f)
         } else {
@@ -424,6 +434,7 @@ class BattleEngine(
         forWallsNear(t.x, t.y, t.type.splash) { i, j -> damageWall(i, j, dmg * 10f) }
         buildings.forEach { if (it.alive && it.dist(t.x, t.y) <= t.type.splash) damageBuilding(it, dmg) }
         effects += Fx(FxKind.EXPLOSION, t.x, t.y, time, 0.6f, 1.3f)
+        sounds += Snd.BOOM
         t.hp = 0f
     }
 
@@ -456,6 +467,7 @@ class BattleEngine(
                 a.hp = min(a.maxHp, a.hp + t.power)
                 effects += Fx(FxKind.HEAL, a.x, a.y, time, 0.7f, 0.5f)
                 healed = true
+                sounds += Snd.HEAL
             }
         }
         if (healed) t.attackAnim = 0.3f
@@ -561,6 +573,7 @@ class BattleEngine(
             .minByOrNull { hypot(it.x - b.cx, it.y - b.cy) } ?: return
         b.cooldown = def.interval
         b.shotAt = time
+        sounds += when (b.type) { BType.ARCHER_TOWER -> Snd.ARROW; BType.CANNON -> Snd.CANNON; else -> Snd.MAGIC }
         val dmg = def.dps * def.interval
         val sy = b.y + 0.2f
         projectiles += when (b.type) {
@@ -639,6 +652,7 @@ class BattleEngine(
         if (wallHp[i][j] <= 0f) {
             wallHp[i][j] = 0f
             destroyVersion++
+            sounds += Snd.WALL
             effects += Fx(FxKind.RUBBLE, i + 0.5f, j + 0.5f, time, 0.6f, 0.8f)
         }
     }
@@ -653,6 +667,7 @@ class BattleEngine(
             for (i in b.x.toInt() until (b.x + b.s).toInt()) for (j in b.y.toInt() until (b.y + b.s).toInt()) occ[i][j] = -1
             destroyVersion++
             effects += Fx(FxKind.EXPLOSION, b.cx, b.cy, time, 0.7f, b.s * 1.1f)
+            sounds += Snd.BOOM
             repeat(6) {
                 val a = rng.nextFloat() * 6.283f
                 val sp = 0.6f + rng.nextFloat() * 0.9f

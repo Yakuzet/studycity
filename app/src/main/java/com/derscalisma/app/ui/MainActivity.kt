@@ -39,6 +39,10 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             val data by Repo.state.collectAsState()
+            val st = data.settings
+            androidx.compose.runtime.LaunchedEffect(st.sfxEnabled, st.musicEnabled, st.sfxVolume, st.musicVolume) {
+                com.derscalisma.app.audio.Sound.apply(st.sfxEnabled, st.musicEnabled, st.sfxVolume, st.musicVolume)
+            }
             AppTheme(data.theme) {
                 AppRoot(data)
             }
@@ -49,11 +53,13 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         Repo.foreground = true
         Repo.onAppResume()
+        com.derscalisma.app.audio.Sound.onResume()
     }
 
     override fun onPause() {
         Repo.foreground = false
         Repo.backupExternally()
+        com.derscalisma.app.audio.Sound.onPause()
         super.onPause()
     }
 }

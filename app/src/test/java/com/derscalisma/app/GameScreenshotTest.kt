@@ -64,7 +64,7 @@ class GameScreenshotTest {
     }
 
     private fun shot(name: String, screen: Screen) {
-        val data = AppData(coins = 2350, game = sampleVillage(), bestDailyStreak = 9)
+        val data = AppData(coins = 2350, game = sampleVillage(), bestDailyStreak = 9, settings = Settings(view3d = false))
         paparazzi.snapshot(name) { AppTheme(data.theme) { AppRoot(data, initialScreen = screen) } }
     }
 
@@ -77,7 +77,7 @@ class GameScreenshotTest {
     }
 
     private fun tab(name: String, tab: CityTab) {
-        val data = AppData(coins = 2350, game = sampleVillage(), bestDailyStreak = 9)
+        val data = AppData(coins = 2350, game = sampleVillage(), bestDailyStreak = 9, settings = Settings(view3d = false))
         paparazzi.snapshot(name) {
             AppTheme(data.theme) {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {

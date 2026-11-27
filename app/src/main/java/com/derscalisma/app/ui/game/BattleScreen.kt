@@ -80,6 +80,11 @@ fun BattleScreen(level: Int, data: AppData, onExit: () -> Unit) {
     var confirmExit by remember { mutableStateOf(false) }
     var mapSize by remember { mutableStateOf(Size.Zero) }
 
+    DisposableEffect(Unit) {
+        com.derscalisma.app.audio.Sound.music(com.derscalisma.app.audio.Music.BATTLE)
+        onDispose { com.derscalisma.app.audio.Sound.music(null) }
+    }
+
     LaunchedEffect(engine) {
         var last = withFrameNanos { it }
         while (true) {
@@ -87,9 +92,12 @@ fun BattleScreen(level: Int, data: AppData, onExit: () -> Unit) {
                 engine.step((now - last) / 1_000_000_000f)
                 last = now
                 frame++
+                playBattleSounds(engine)
             }
             if (engine.finished && reward == null) {
                 reward = Game.finishBattle(engine.result())
+                com.derscalisma.app.audio.Sound.music(null)
+                com.derscalisma.app.audio.Sound.jingle(if (engine.stars > 0) com.derscalisma.app.audio.Jingle.VICTORY else com.derscalisma.app.audio.Jingle.DEFEAT)
                 delay(900)
                 showResult = true
             }
@@ -102,10 +110,9 @@ fun BattleScreen(level: Int, data: AppData, onExit: () -> Unit) {
     fun nextTroop(): Pick? = engine.remaining.filterValues { it > 0 }.keys
         .filter { it != TType.HERO }.minByOrNull { it.ordinal }?.let { Pick.Troop(it) }
 
-    fun actAt(p: Offset, first: Boolean) {
+    fun actAtTile(mx: Float, my: Float, first: Boolean) {
         val cur = pick ?: return
-        if (mapSize == Size.Zero) return
-        val m = fitFor(mapSize.width, mapSize.height).toMap(p)
+        val m = Offset(mx, my)
         when (cur) {
             is Pick.Spell -> if (first) {
                 engine.castSpell(cur.s, m.x, m.y)
@@ -119,10 +126,19 @@ fun BattleScreen(level: Int, data: AppData, onExit: () -> Unit) {
         frame++
     }
 
+    fun actAt(p: Offset, first: Boolean) {
+        if (mapSize == Size.Zero) return
+        val m = fitFor(mapSize.width, mapSize.height).toMap(p)
+        actAtTile(m.x, m.y, first)
+    }
+
+    val use3d = data.settings.view3d && !androidx.compose.ui.platform.LocalInspectionMode.current
+
     Box(Modifier.fillMaxSize().background(Color(0xFF2E4A26))) {
         Column(Modifier.fillMaxSize()) {
             BattleHud(engine, frame) { confirmExit = true }
-            Canvas(
+            if (use3d) com.derscalisma.app.ui.game3d.Battle3D(engine, frame, { x, y, first -> actAtTile(x, y, first) }, Modifier.weight(1f).fillMaxWidth())
+            else Canvas(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
@@ -518,4 +534,26 @@ internal fun BattleFrame(engine: BattleEngine, modifier: Modifier = Modifier) {
     val sprites = rememberSprites()
     val ground = remember { sprites.ground(seed = engine.village.level * 31 + 7) }
     Canvas(modifier) { drawBattle(engine, sprites, ground, fitFor(size.width, size.height)) }
+}
+
+
+internal fun playBattleSounds(e: BattleEngine) {
+    if (e.sounds.isEmpty()) return
+    for (snd in e.sounds) {
+        val sfx = when (snd) {
+            BattleEngine.Snd.DEPLOY -> com.derscalisma.app.audio.Sfx.DEPLOY
+            BattleEngine.Snd.SWORD -> com.derscalisma.app.audio.Sfx.SWORD
+            BattleEngine.Snd.ARROW -> com.derscalisma.app.audio.Sfx.ARROW
+            BattleEngine.Snd.CANNON -> com.derscalisma.app.audio.Sfx.CANNON
+            BattleEngine.Snd.MAGIC -> com.derscalisma.app.audio.Sfx.MAGIC
+            BattleEngine.Snd.BOOM -> com.derscalisma.app.audio.Sfx.EXPLOSION
+            BattleEngine.Snd.WALL -> com.derscalisma.app.audio.Sfx.HIT_METAL
+            BattleEngine.Snd.SPELL -> com.derscalisma.app.audio.Sfx.SPELL
+            BattleEngine.Snd.LIGHTNING -> com.derscalisma.app.audio.Sfx.LIGHTNING
+            BattleEngine.Snd.HEAL -> com.derscalisma.app.audio.Sfx.HEAL
+            BattleEngine.Snd.DIE -> com.derscalisma.app.audio.Sfx.PUNCH
+        }
+        com.derscalisma.app.audio.Sound.play(sfx, volume = 0.7f)
+    }
+    e.sounds.clear()
 }

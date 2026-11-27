@@ -9,5 +9,6 @@ class App : Application() {
         super.onCreate()
         Notifier.createChannels(this)
         Repo.init(this)
+        com.derscalisma.app.audio.Sound.init(this)
     }
 }

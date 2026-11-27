@@ -4,6 +4,9 @@ import android.content.Context
 import com.derscalisma.app.data.game.Game
 import com.derscalisma.app.data.game.GameCatalog
 import com.derscalisma.app.data.game.advanceGame
+import com.derscalisma.app.data.game.ensureBoss
+import com.derscalisma.app.data.game.giveChest
+import com.derscalisma.app.data.game.hitBoss
 import com.derscalisma.app.data.game.migrateOldCity
 import com.derscalisma.app.data.game.processSpells
 import com.derscalisma.app.data.game.processTraining
@@ -127,6 +130,8 @@ object Repo {
         val phaseEvents = mutableListOf<PhaseEvent>()
         var beep = false
         var askFocus = false
+        /** Ön plandaysa çalınacak sesler (Sfx ya da Jingle). */
+        val sounds = mutableListOf<Any>()
 
         fun day(key: String): DayRecord = data.days[key] ?: DayRecord()
 
@@ -145,6 +150,7 @@ object Repo {
             val full = if (amount > 0) "$text  +$amount 🪙" else text
             log(full, amount)
             notices += full
+            if (amount > 0) sounds += com.derscalisma.app.audio.Sfx.COIN
         }
 
         fun log(text: String, coins: Int = 0) {
@@ -178,6 +184,12 @@ object Repo {
         if (before.focusAsk != null && after.focusAsk == null) Notifier.cancelFocusAsk(ctx)
         tx.alerts.forEach { (title, text) -> Notifier.alert(ctx, title, text) }
         tx.notices.forEach { if (foreground) _messages.tryEmit(it) else Notifier.reward(ctx, it) }
+        if (foreground) tx.sounds.forEach {
+            when (it) {
+                is com.derscalisma.app.audio.Sfx -> com.derscalisma.app.audio.Sound.play(it)
+                is com.derscalisma.app.audio.Jingle -> com.derscalisma.app.audio.Sound.jingle(it)
+            }
+        }
     }
 
     // ---------------------------------------------------------------- lifecycle
@@ -188,6 +200,7 @@ object Repo {
             catchUp()
             pruneFired()
             migrateOldCity()
+            ensureBoss()
             processTraining()
             processSpells()
             val ask = data.focusAsk
@@ -281,6 +294,7 @@ object Repo {
             ),
             lastSession = null,
         )
+        sounds += com.derscalisma.app.audio.Sfx.BOOK_OPEN
     }
 
     /**
@@ -477,6 +491,8 @@ object Repo {
         if (completed) {
             phaseEvents += PhaseEvent(PhaseEventKind.FINISHED, t.round, t.rounds, (worked / MINUTE_MS).toInt())
             award(Rewards.sessionComplete(t.rounds), "✅ ${t.rounds} turluk oturumu tamamladın!")
+            if (worked >= 20 * MINUTE_MS) giveChest(com.derscalisma.app.data.game.ChestKind.WOOD, "Oturum tamamlandı")
+            sounds += com.derscalisma.app.audio.Sfx.BOOK_CLOSE
         } else if (worked >= MINUTE_MS) {
             log("⏹ Oturum bitirildi: ${Time.duration(worked)} çalışıldı")
         }
@@ -518,6 +534,7 @@ object Repo {
         val bonus = (base * Game.libraryBonus(data.game) / 100f).roundToInt()
         addCoins(base + bonus)
         advanceGame(e - s)
+        hitBoss(e - s)
         checkAchievements(date, e)
     }
 
@@ -542,6 +559,7 @@ object Repo {
             updateDay(key) { it.copy(dailyMet = true) }
             val st = Streaks.daily(data, date)
             award(Rewards.daily(st), "🔥 Günlük hedefe ulaştın! Seri: $st gün")
+            giveChest(com.derscalisma.app.data.game.ChestKind.SILVER, "Günlük hedef")
             Rewards.milestones[st]?.let { award(it, "🏅 $st günlük seri rozeti kazandın!") }
             val oldBest = data.bestDailyStreak
             if (st > oldBest) {
@@ -573,6 +591,56 @@ object Repo {
             it.copy(progress = it.progress + (goalId to v))
         }
         data.goals.find { it.id == goalId }?.let { checkGoal(it, today) }
+        checkDeadlines()
+    }
+
+    /** Süreli hedeflerden tamamlananları ödüllendirir (bir kez). */
+    private fun Tx.checkDeadlines() {
+        val today = Time.date(now)
+        val list = data.deadlines.map { g ->
+            if (g.completedAt != null) return@map g
+            val st = Deadlines.status(data, g, today)
+            if (st.remaining > 0) return@map g
+            val reward = Deadlines.reward(st)
+            award(reward, if (st.daysLeft > 0) "🏁 \"${g.title}\" hedefini ${st.daysLeft - 1} gün erken bitirdin!" else "🏁 \"${g.title}\" hedefi bitti")
+            g.copy(completedAt = now)
+        }
+        if (list != data.deadlines) data = data.copy(deadlines = list)
+    }
+
+    // ---------------------------------------------------------------- süreli hedefler
+
+    fun addDeadline(title: String, unit: String, total: Int, dueDate: String, linkedGoalId: String?) = mutate {
+        val g = DeadlineGoal(
+            id = Time.newId(),
+            title = title.ifBlank { "Süreli hedef" },
+            unit = unit.ifBlank { "adet" },
+            total = total.coerceAtLeast(1),
+            startDate = Time.dayKey(now),
+            dueDate = dueDate,
+            linkedGoalId = linkedGoalId,
+        )
+        data = data.copy(deadlines = data.deadlines + g)
+        checkDeadlines()
+    }
+
+    fun deleteDeadline(id: String) = mutate {
+        data = data.copy(deadlines = data.deadlines.filterNot { it.id == id })
+    }
+
+    fun addDeadlineProgress(id: String, delta: Int) = mutate {
+        data = data.copy(deadlines = data.deadlines.map { if (it.id == id) it.copy(manual = (it.manual + delta).coerceAtLeast(0)) else it })
+        checkDeadlines()
+    }
+
+    /** Bağlı günlük hedefi, süreli hedefi zamanında bitirecek günlük miktara ayarlar. */
+    fun matchDailyToDeadline(id: String): String? = mutate {
+        val g = data.deadlines.find { it.id == id } ?: return@mutate null
+        val goalId = g.linkedGoalId ?: return@mutate null
+        val st = Deadlines.status(data, g, Time.date(now))
+        val target = st.perDay.coerceAtLeast(1)
+        data = data.copy(goals = data.goals.map { if (it.id == goalId) it.copy(dailyTarget = target) else it })
+        "🎯 Günlük hedef $target ${g.unit} yapıldı"
     }
 
     // ---------------------------------------------------------------- goals & settings
@@ -595,7 +663,14 @@ object Repo {
     fun addProgress(goalId: String, delta: Int) = mutate { addProgressInternal(goalId, delta) }
 
     fun logSession(values: Map<String, Int>) = mutate {
-        values.forEach { (id, v) -> if (v > 0) addProgressInternal(id, v) }
+        values.forEach { (id, v) ->
+            if (v <= 0) return@forEach
+            if (id.startsWith("dl:")) {
+                val dl = id.removePrefix("dl:")
+                data = data.copy(deadlines = data.deadlines.map { if (it.id == dl) it.copy(manual = it.manual + v) else it })
+            } else addProgressInternal(id, v)
+        }
+        checkDeadlines()
         data = data.copy(lastSession = null)
     }
 

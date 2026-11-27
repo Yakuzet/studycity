@@ -18,6 +18,9 @@ data class BattleResult(
 
 data class BattleReward(val loot: Int, val starBonus: Int, val newStars: Int, val leagueBonus: Int = 0)
 
+/** Sadece sandıktan çıkan süsler. */
+val RARE_DECOR = setOf(BType.GOLD_MONUMENT, BType.SAGE_STATUE, BType.DRAGON_STATUE)
+
 /** Köy oyununun sorguları ve oyuncu işlemleri. */
 object Game {
 
@@ -105,6 +108,10 @@ object Game {
     /** Bu bina türü şu an yapılabilir mi? Değilse sebebi. */
     fun buildBlockReason(g: GameState, t: BType, coins: Int, bestStreak: Int): String? {
         val th = th(g)
+        if (t in RARE_DECOR) {
+            if ((g.decorTokens[t] ?: 0) <= 0) return "🎁 Sadece sandıktan çıkar"
+            return null
+        }
         if (t.cat == BCat.DECOR) {
             val need = GameCatalog.DECOR_UNLOCK[t]
             if (need != null && bestStreak < need) return "🔒 $need günlük seri gerekli"
@@ -133,7 +140,9 @@ object Game {
         } else {
             GBuilding(Time.newId(), t, 0, x, y, upgrade = Upgrade(1, study * MINUTE_MS), collectedAt = now)
         }
-        data = data.copy(coins = data.coins - cost, game = g.copy(buildings = g.buildings + b))
+        val tokens = if (t in RARE_DECOR) g.decorTokens + (t to ((g.decorTokens[t] ?: 1) - 1)) else g.decorTokens
+        data = data.copy(coins = data.coins - cost, game = g.copy(buildings = g.buildings + b, decorTokens = tokens))
+        sounds += com.derscalisma.app.audio.Sfx.HAMMER
         if (b.upgrade != null) "🏗️ ${t.title} inşaatı başladı: $study dk ders çalışınca bitecek" else null
     }
 
@@ -157,6 +166,7 @@ object Game {
             coins = data.coins - cost + stored,
             game = g.copy(buildings = g.buildings.map { if (it.id == id) nb else it }),
         )
+        sounds += com.derscalisma.app.audio.Sfx.HAMMER2
         "🔨 ${b.type.title} seviye $to yükseltmesi başladı"
     }
 
@@ -198,6 +208,7 @@ object Game {
             totalEarned = data.totalEarned + amount,
             game = g.copy(buildings = g.buildings.map { if (it.id == id) it.copy(collectedAt = now) else it }),
         )
+        sounds += com.derscalisma.app.audio.Sfx.COINS_BIG
         "⛏️ +$amount 🪙 toplandı"
     }
 
@@ -209,6 +220,7 @@ object Game {
         val spot = findFreeSpot(g, BType.BUILDER_HUT.size) ?: return@mutate "Köyde yer kalmadı"
         val hut = GBuilding(Time.newId(), BType.BUILDER_HUT, 1, spot.first, spot.second)
         data = data.copy(coins = data.coins - cost, game = g.copy(builders = g.builders + 1, buildings = g.buildings + hut))
+        sounds += com.derscalisma.app.audio.Sfx.BELL
         "👷 Yeni inşaatçı işe başladı!"
     }
 
@@ -228,6 +240,7 @@ object Game {
             coins = data.coins - cost,
             game = g.copy(queue = q, queueStartedAt = if (g.queue.isEmpty()) now else g.queueStartedAt),
         )
+        sounds += com.derscalisma.app.audio.Sfx.TRAIN
         null
     }
 
@@ -318,6 +331,7 @@ object Game {
             game = g.copy(claimed = g.claimed + (id to st.claimedTiers + 1)),
         )
         log("${st.quest.emoji} Görev: ${st.quest.title} (${st.target} ${st.quest.unit})", st.reward)
+        sounds += com.derscalisma.app.audio.Sfx.COINS_BIG
         "${st.quest.emoji} ${st.quest.title} ödülü: +${st.reward} 🪙"
     }
 
@@ -400,6 +414,7 @@ internal fun Repo.Tx.advanceGame(ms: Long) {
         log(it)
         notices += it
     }
+    if (done.isNotEmpty()) sounds += com.derscalisma.app.audio.Jingle.BUILD
 }
 
 internal fun Repo.Tx.processTraining() {

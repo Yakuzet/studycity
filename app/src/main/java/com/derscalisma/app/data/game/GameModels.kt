@@ -38,6 +38,9 @@ enum class BType(val title: String, val size: Int, val maxLevel: Int, val cat: B
     STALL("Pazar Tezgâhı", 1, 1, BCat.DECOR, "Renkli bir pazar tezgâhı."),
     STATUE("Kahraman Heykeli", 1, 1, BCat.DECOR, "Azminin anıtı."),
     WINDMILL("Yel Değirmeni", 2, 1, BCat.DECOR, "Pervaneleri dönen değirmen."),
+    GOLD_MONUMENT("Altın Anıt", 1, 1, BCat.DECOR, "Sadece sandıktan çıkar. Parlayan bir zafer anıtı."),
+    SAGE_STATUE("Bilge Heykeli", 1, 1, BCat.DECOR, "Sadece sandıktan çıkar. Bilgeliğin simgesi."),
+    DRAGON_STATUE("Ejder Taşı", 2, 1, BCat.DECOR, "Sadece sandıktan çıkar. Efsanevi ejderin taşlaşmış yumurtası."),
 }
 
 @Serializable
@@ -140,6 +143,12 @@ data class GameState(
     val troopsTrained: Int = 0,
     /** Görev kimliği -> alınmış ödül kademesi sayısı. */
     val claimed: Map<String, Int> = emptyMap(),
+    val boss: BossState? = null,
+    val chests: List<ChestKind> = emptyList(),
+    /** İnşaat İksiri: tüm inşaatlara 30 dk ders ilerlemesi ekler. */
+    val potions: Int = 0,
+    /** Sandıktan çıkan, kurulmayı bekleyen nadir süsler. */
+    val decorTokens: Map<BType, Int> = emptyMap(),
 )
 
 fun starterVillage(): List<GBuilding> = listOf(

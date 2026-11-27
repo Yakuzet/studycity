@@ -47,6 +47,9 @@ class Sprites(private val res: Resources) {
         BType.SPELL_FORGE to img(R.drawable.g_forge),
         BType.HERO_ALTAR to img(R.drawable.g_altar),
         BType.WALL to img(R.drawable.g_rock),
+        BType.GOLD_MONUMENT to img(R.drawable.g_statue),
+        BType.SAGE_STATUE to img(R.drawable.g_statue),
+        BType.DRAGON_STATUE to img(R.drawable.g_rock),
     )
     private val troops = mapOf(
         TType.SWORD to img(R.drawable.g_u_sword),
